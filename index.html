@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#FAFAF7">
+<title>BRAINSTORM</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='11' fill='%23fff' stroke='%23111' stroke-width='6'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://api.fontshare.com" crossorigin>
+<link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@500,800&f[]=jet-brains-mono@400,500&display=swap">
+<link rel="stylesheet" href="estilo.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js" integrity="sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi" crossorigin="anonymous" referrerpolicy="no-referrer" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a" crossorigin="anonymous" referrerpolicy="no-referrer" defer></script>
+<script type="module" src="js/app.js"></script>
+</head>
+<body>
+<div class="app" id="app">
+  <header class="top">
+    <svg class="mark" viewBox="0 0 26 26" aria-hidden="true"><path d="M2 20h7l8-14h7" fill="none" stroke="#111" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="13" cy="13" r="5.5" fill="#fff" stroke="#111" stroke-width="3"/></svg>
+    <nav class="crumbs" aria-label="Caminho"><ol id="crumbs"></ol></nav>
+    <div class="top-r">
+      <span class="tag-local" id="tagLocal" hidden title="Modo local: as mudanças ficam só neste navegador">local</span>
+      <button class="sync" id="sync" data-s="salvo" aria-live="polite"><span class="sd" aria-hidden="true"></span><span class="sl" id="syncL">salvo</span></button>
+      <span class="date" id="hoje"></span>
+      <button class="btn" id="btnGaveta" aria-haspopup="dialog" aria-controls="sheet" title="Gaveta (G)">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 13h5l1.5 2.5h5L16 13h5"/><path d="M5 5h14l2 8v6H3v-6z"/></svg>
+        <span class="gv-label">Gaveta</span><span class="count" id="gvCount">0</span>
+      </button>
+    </div>
+  </header>
+  <main class="main" id="main">
+    <section class="map" id="map" aria-label="Mapa mental">
+      <div class="map-ui map-bl">
+        <button class="btn btn--sm" id="btnAtalhos" aria-expanded="false" aria-controls="atalhos">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14l10-10"/><path d="M14 4h6v6"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg>
+          Atalhos
+        </button>
+      </div>
+      <div class="atalhos" id="atalhos" hidden>
+        <h2>Atalhos <small>produção</small></h2>
+        <ul id="atalhosList"></ul>
+        <button class="reset" id="btnSair">Sair</button>
+      </div>
+      <div class="estado" id="estado" hidden><div class="estado-in" id="estadoIn"></div></div>
+    </section>
+  </main>
+</div>
+<div class="scrim" id="scrim" hidden></div>
+<aside class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetT" hidden>
+  <div class="sheet-h">
+    <div><h2 id="sheetT">Gaveta</h2><p id="sheetSub"></p></div>
+    <button class="btn btn--sm btn--ghost" id="btnFechaGaveta" aria-label="Fechar a gaveta">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
+  <div class="sheet-b" id="sheetB"></div>
+</aside>
+
+<section class="entrada" id="entrada" aria-labelledby="entradaT" hidden>
+  <div class="entrada-in">
+    <svg class="linhas" viewBox="0 0 560 120" aria-hidden="true">
+      <path d="M0 96H120L168 48H300" fill="none" stroke="#E2231A" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M0 72H96L144 24H430" fill="none" stroke="#1F4FD8" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M180 108H380L404 84H560" fill="none" stroke="#0A7F55" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="300" cy="48" r="11" fill="#fff" stroke="#111" stroke-width="5"/>
+      <circle cx="430" cy="24" r="9" fill="#fff" stroke="#1F4FD8" stroke-width="4"/>
+      <circle cx="404" cy="84" r="9" fill="#fff" stroke="#0A7F55" stroke-width="4"/>
+    </svg>
+    <h1 id="entradaT">BRAINSTORM</h1>
+    <p class="sub">Entrar com a chave do GitHub · uma vez por navegador</p>
+    <ol class="passos">
+      <li><span class="bul">1</span><span>No GitHub: <b>Settings › Developer settings › Fine-grained tokens</b> › <b>Generate new token</b>.</span></li>
+      <li><span class="bul">2</span><span>Em <b>Repository access</b>, escolhe <b>Only select repositories</b> › <code>brainstorm</code>. Em <b>Permissions</b>: <b>Contents</b> › <b>Read and write</b>.</span></li>
+      <li><span class="bul">3</span><span>Gera, copia e cola aqui embaixo. A chave fica só neste navegador.</span></li>
+    </ol>
+    <form id="formEntrada" autocomplete="off">
+      <div class="campo">
+        <label for="token">Chave (começa com github_pat_)</label>
+        <input id="token" name="token" type="password" spellcheck="false" autocapitalize="off" autocomplete="off" required>
+      </div>
+      <div class="linha-btn">
+        <button class="btn btn--solid" type="submit" id="btnEntrar">Testar e entrar</button>
+      </div>
+      <div id="entradaErro" role="alert"></div>
+    </form>
+    <p class="nota-seg">A chave só é enviada para api.github.com. Para tirar daqui, usa “Sair” no menu Atalhos.</p>
+  </div>
+</section>
+</body>
+</html>

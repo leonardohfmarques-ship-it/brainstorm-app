@@ -1,0 +1,8 @@
+{
+  "name": "brainstorm-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test testes/*.test.mjs"
+  }
+}
