@@ -239,6 +239,57 @@ function buildGraph(W, H) {
 
 /* ---------------- render do mapa ---------------- */
 const mapEl = $('#map'), mainEl = $('#main');
+/* câmera do mapa: zoom e passeio, sem mexer nas posições gravadas */
+const camEl = document.createElement('div'); camEl.className = 'cam'; mapEl.insertBefore(camEl, mapEl.firstChild);
+const CAM = { z: 1, x: 0, y: 0 }, ZMIN = 0.3, ZMAX = 2.5;
+function applyCam() {
+  camEl.style.transform = `translate(${f1(CAM.x)}px,${f1(CAM.y)}px) scale(${CAM.z})`;
+  const g = 24 * CAM.z;
+  mapEl.style.backgroundSize = `${g}px ${g}px`;
+  mapEl.style.backgroundPosition = `${f1(CAM.x + 12 * CAM.z)}px ${f1(CAM.y + 12 * CAM.z)}px`;
+  const zl = $('#zoomNivel'); if (zl) zl.textContent = Math.round(CAM.z * 100) + '%';
+}
+function zoomEm(px, py, fator) {
+  const z = Math.min(ZMAX, Math.max(ZMIN, CAM.z * fator)); if (z === CAM.z) return;
+  CAM.x = px - (px - CAM.x) * (z / CAM.z); CAM.y = py - (py - CAM.y) * (z / CAM.z); CAM.z = z; applyCam();
+}
+function zoomCentro(fator) { const r = mapEl.getBoundingClientRect(); zoomEm(r.width / 2, r.height / 2, fator); }
+function camReset() { CAM.z = 1; CAM.x = 0; CAM.y = 0; applyCam(); }
+const ptMapa = e => { const r = mapEl.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+const foraDoMapa = t => t.closest('.st, .map-ui, .atalhos, .estado, .cartouche, button, input, textarea, a');
+mapEl.addEventListener('wheel', e => {
+  if (!store || e.target.closest('.atalhos, .estado')) return;
+  e.preventDefault();
+  if (e.ctrlKey || e.metaKey) { const [px, py] = ptMapa(e); zoomEm(px, py, Math.exp(-e.deltaY * 0.01)); }
+  else { CAM.x -= e.deltaX; CAM.y -= e.deltaY; applyCam(); }
+}, { passive: false });
+// Safari no Mac: pinça do trackpad chega como gesture
+let gesto = 1;
+mapEl.addEventListener('gesturestart', e => { e.preventDefault(); gesto = 1; });
+mapEl.addEventListener('gesturechange', e => { e.preventDefault(); const [px, py] = ptMapa(e); zoomEm(px, py, e.scale / gesto); gesto = e.scale; });
+// arrastar o fundo passeia; dois dedos no fundo dão zoom
+const dedos = new Map(); let passeio = null;
+mapEl.addEventListener('pointerdown', e => {
+  if (!store || drag || busy || foraDoMapa(e.target)) return;
+  dedos.set(e.pointerId, ptMapa(e));
+  try { mapEl.setPointerCapture(e.pointerId); } catch (err) { /* sem captura */ }
+  if (dedos.size === 1) { passeio = { x0: e.clientX, y0: e.clientY, cx: CAM.x, cy: CAM.y }; mapEl.classList.add('is-pan'); }
+  else { passeio = null; const [a, b] = [...dedos.values()]; passeio = { pinca: Math.hypot(a[0] - b[0], a[1] - b[1]) }; }
+});
+mapEl.addEventListener('pointermove', e => {
+  if (!dedos.has(e.pointerId)) return;
+  dedos.set(e.pointerId, ptMapa(e));
+  if (!passeio) return;
+  if (passeio.pinca && dedos.size >= 2) {
+    const [a, b] = [...dedos.values()], d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+    zoomEm((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, d / passeio.pinca); passeio.pinca = d;
+  } else if (!passeio.pinca) { CAM.x = passeio.cx + e.clientX - passeio.x0; CAM.y = passeio.cy + e.clientY - passeio.y0; applyCam(); }
+});
+const fimPasseio = e => { dedos.delete(e.pointerId); if (!dedos.size) { passeio = null; mapEl.classList.remove('is-pan'); } };
+mapEl.addEventListener('pointerup', fimPasseio); mapEl.addEventListener('pointercancel', fimPasseio);
+$('#zoomMais').addEventListener('click', () => zoomCentro(1.25));
+$('#zoomMenos').addEventListener('click', () => zoomCentro(0.8));
+$('#zoomNivel').addEventListener('click', camReset);
 let G = { nodes: [], edges: [], byId: {}, W: 0, H: 0, world: null, svg: null, start: 0, step: 360 };
 let raf = 0, drag = null, busy = false, clickT = 0;
 
@@ -269,6 +320,7 @@ function nodeHTML(n) {
 
 function renderMap(opts = {}) {
   if (!store) return;
+  if (UI.path.length && !resolve(UI.path)) { UI.path = []; UI.sel = null; saveUI(); }
   const rect = mapEl.getBoundingClientRect();
   const W = Math.max(320, rect.width), H = Math.max(320, rect.height);
   const prev = G.byId;
@@ -300,7 +352,7 @@ function renderMap(opts = {}) {
     n.el = el; bindNode(n);
     world.appendChild(el);
   });
-  mapEl.insertBefore(world, mapEl.firstChild);
+  camEl.appendChild(world);
   G = { nodes: g.nodes, edges: g.edges, byId: g.byId, W, H, world, svg, start: g.start, step: g.step };
   applyDim();
   G.nodes.forEach(n => { if (n.moved) relabel(n); });
@@ -354,7 +406,7 @@ function bindNode(n) {
   if (n.kind === 'obras') return;
   if (n.kind === 'ghost') {
     el.addEventListener('click', () => {
-      if (n.vazio) { if (!resolve(UI.path).node.pedido) newDirection(); else toast('Pedido ao Claude. As direções aparecem aqui quando ele terminar.'); }
+      if (n.vazio) { if (!resolve(UI.path).node.pedido) newDirection(); else toast('O Claude está desenvolvendo. As direções aparecem aqui sozinhas.'); }
       else toast(`Linha ${areaNome(n.area)} sem estações. Manda a próxima ideia pelo Claude Code.`);
     });
     return;
@@ -376,15 +428,15 @@ function bindNode(n) {
 }
 window.addEventListener('pointermove', e => {
   if (!drag) return;
-  const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
+  const dx = (e.clientX - drag.x0) / CAM.z, dy = (e.clientY - drag.y0) / CAM.z;
   if (!drag.moved) {
-    if (Math.hypot(dx, dy) < 5) return;
+    if (Math.hypot(dx, dy) * CAM.z < 5) return;
     drag.moved = true; drag.el.classList.add('is-drag');
     try { drag.el.setPointerCapture(drag.pid); } catch (err) { /* sem captura */ }
   }
   const n = drag.n;
-  n.x = n.cx = Math.max(20, Math.min(G.W - 20, drag.nx + dx));
-  n.y = n.cy = Math.max(20, Math.min(G.H - 20, drag.ny + dy));
+  n.x = n.cx = Math.max(-2 * G.W, Math.min(3 * G.W, drag.nx + dx));
+  n.y = n.cy = Math.max(-2 * G.H, Math.min(3 * G.H, drag.ny + dy));
   const mdx = n.x - drag.nx, mdy = n.y - drag.ny;
   const descSet = new Set(drag.desc.map(o => o.id));
   drag.desc.forEach(o => { const s = drag.snapshot[o.id]; o.x = s[0] + mdx; o.y = s[1] + mdy; });
@@ -511,7 +563,7 @@ function navigate(path, opt = {}) {
   closeAtalhos();
   const wasIdea = UI.path.length > 0, willIdea = path.length > 0;
   const go = () => {
-    UI.path = path; UI.sel = opt.sel != null ? opt.sel : null; UI.hl = null; saveUI();
+    UI.path = path; UI.sel = opt.sel != null ? opt.sel : null; UI.hl = null; saveUI(); camReset();
     renderAll({ enter: true, panelIn: !wasIdea && willIdea });
     if (opt.flash && G.byId[opt.flash]) { const el = G.byId[opt.flash].el; el.classList.add('pulse'); setTimeout(() => el.classList.remove('pulse'), 1200); }
     busy = false;
@@ -649,7 +701,7 @@ function renderBody(anim) {
     h += `</ul>`;
   }
   if (target.pedido) {
-    h += `<div class="dev" style="margin-top:${tkids.length ? 16 : 4}px"><div class="wait" style="--c:${col}" role="status"><strong>Pedido ao Claude</strong><p>Marcado no arquivo. As direções novas saem desta estação quando ele terminar.</p><span class="dica">Pede no Claude Code: <q>desenvolve o que eu marquei</q></span><div class="rail"><div class="runner"></div></div><button class="btn btn--sm" data-act="cancelar">${ICON.x}Cancelar pedido</button></div></div>`;
+    h += `<div class="dev" style="margin-top:${tkids.length ? 16 : 4}px"><div class="wait" style="--c:${col}" role="status"><strong>Claude desenvolvendo…</strong><p>Leva de 1 a 3 minutos. As direções novas aparecem nesta estação sozinhas; podes continuar mexendo no resto.</p><div class="rail"><div class="runner"></div></div><button class="btn btn--sm" data-act="cancelar">${ICON.x}Cancelar pedido</button></div></div>`;
   } else if (!tkids.length) {
     h += `<div class="dev"><button class="btn btn--solid" data-act="desenvolver">${ICON.branch}Desenvolver</button><small>${targetIsIdea ? 'Pede ao Claude direções para esta ideia.' : 'Pede ao Claude direções novas dentro desta.'} Nada muda até ele responder.</small></div>`;
   }
@@ -699,7 +751,7 @@ function bindBody(pin, target, targetIsIdea, d) {
     if (a === 'desenvolver') {
       if (target.provisorio) { toast('Dá um nome à direção antes de pedir ao Claude.'); return; }
       store.remendar(file, { fm: { pedido: 'desenvolver' } }, `App: pede ao Claude para desenvolver "${titulo}"`);
-      renderMap({ keep: true }); renderBody(false); toast('Marcado. Pede no Claude Code: desenvolve o que eu marquei');
+      renderMap({ keep: true }); renderBody(false); toast('Pedido enviado. O Claude está desenvolvendo; em 1 a 3 minutos aparece aqui.');
     }
     if (a === 'cancelar') {
       store.remendar(file, { fm: { pedido: null } }, `App: cancela o pedido de desenvolver "${titulo}"`);
@@ -878,10 +930,10 @@ function renderMapUI() {
     const ativas = M().ideias.filter(i => i.estado === 'ativa').length, g = guardadas().length;
     const hl = UI.hl ? ` · linha ${areaNome(UI.hl)} em destaque` : '';
     ui.innerHTML = `<div class="cartouche dyn"><h1>Mapa geral</h1><p>${plural(ativas, 'ideia ativa', 'ideias ativas')} · ${g} na gaveta${hl}</p></div>
-      <div class="map-ui map-tr dyn hint"><span>arraste para mover</span><span class="h-opt">clique na área destaca a linha</span><span>clique na estação abre a ideia</span></div>`;
+      <div class="map-ui map-tr dyn hint"><span>arraste para mover</span><span class="h-opt">pinça dá zoom</span><span class="h-opt">clique na área destaca a linha</span><span>clique na estação abre a ideia</span></div>`;
   } else {
     ui.innerHTML = `<div class="map-ui map-tr dyn"><button class="btn btn--sm" id="btnNova">${ICON.plus}Nova direção <span class="kbd">N</span></button></div>
-      <div class="map-ui map-br dyn hint"><span>arraste para mover</span><span class="h-opt">duplo clique ou F2 renomeia</span><span>Esc volta um nível</span></div>`;
+      <div class="map-ui map-br dyn hint"><span>arraste para mover</span><span class="h-opt">pinça dá zoom</span><span class="h-opt">duplo clique ou F2 renomeia</span><span>Esc volta um nível</span></div>`;
   }
   [...ui.children].forEach(c => mapEl.appendChild(c));
   const bn = $('#btnNova'); if (bn) bn.addEventListener('click', newDirection);
@@ -927,7 +979,8 @@ async function buscarRemoto(manual) {
   renderStatus();
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && Date.now() - ultimaBusca > 30000) buscarRemoto(false); });
-setInterval(() => { if (document.visibilityState === 'visible' && Date.now() - ultimaBusca > 120000) buscarRemoto(false); }, 30000);
+const haPedido = () => !!store && !store.pend.size && M().ideias.some(temPedido);
+setInterval(() => { if (document.visibilityState === 'visible' && Date.now() - ultimaBusca > (haPedido() ? 20000 : 120000)) buscarRemoto(false); }, 10000);
 window.addEventListener('online', () => { if (store && store.pend.size) store.agora(); });
 window.addEventListener('beforeunload', e => { if (store && store.ocupado) { e.preventDefault(); e.returnValue = ''; } });
 
@@ -948,6 +1001,9 @@ document.addEventListener('keydown', e => {
   if ((e.key === 'n' || e.key === 'N') && UI.path.length && sheet.hidden) { e.preventDefault(); newDirection(); }
   else if ((e.key === 'g' || e.key === 'G') && !e.repeat) { e.preventDefault(); if (sheet.hidden) openGaveta(); else closeGaveta(); }
   else if (e.key === 'F2' && UI.path.length && sheet.hidden) { e.preventDefault(); startRename(UI.sel || null); }
+  else if (!typing && !e.metaKey && !e.ctrlKey && (e.key === '+' || e.key === '=')) { e.preventDefault(); zoomCentro(1.25); }
+  else if (!typing && !e.metaKey && !e.ctrlKey && (e.key === '-' || e.key === '_')) { e.preventDefault(); zoomCentro(0.8); }
+  else if (!typing && !e.metaKey && !e.ctrlKey && e.key === '0') { e.preventDefault(); camReset(); }
 });
 sheet.addEventListener('keydown', e => {
   if (e.key !== 'Tab') return;
