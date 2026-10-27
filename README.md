@@ -1,6 +1,7 @@
 # BRAINSTORM · app
 
-O mapa mental das ideias do Leonardo (direção visual "Diagrama"). Site estático, sem build: abre no navegador,
+O mapa mental das ideias do Leonardo (direção visual "Diagrama"), em três etapas: **Brainstorm** (mapa),
+**Edição** (decidir a ideia) e **Kanban** (plano de ação em cartões). Site estático, sem build: abre no navegador,
 lê e grava as ideias no repositório privado `leonardohfmarques-ship-it/brainstorm` pela API do GitHub.
 O formato dos arquivos é o de `docs/FORMATO.md` daquele repositório; o vocabulário, o de `GLOSSARY.md`.
 
@@ -26,6 +27,7 @@ navegador. “Descartar edições locais” (menu Atalhos) volta aos arquivos.
 
 Ida e volta do formato (inclusive com os arquivos reais de `~/Desktop/BRAINSTORM/ideias`) e o backend do GitHub
 contra uma API de mentira (sem token real): carregar, gravar, juntar mudanças, conflito, criar, sem conexão.
+Seções Edição/Plano, estados, ordem das tarefas e apagar direção (GitHub de mentira e modo local).
 
 ## Como grava
 
@@ -35,11 +37,17 @@ contra uma API de mentira (sem token real): carregar, gravar, juntar mudanças, 
 - `pos` = deslocamento em relação à mãe, em unidades de um mapa de 1000 × 700. Áreas vão em `ideias/mapa-geral.json`.
   Arrastar direções reordena `ordem` pela volta no mapa (e as abas acompanham).
 - Direção nova só vira arquivo quando o nome é confirmado (o slug da pasta nunca muda depois).
+- Apagar direção: some da tela na hora ("Desfazer" por 8 s) e depois vai num commit só pela Git Data API
+  (árvore nova sem a pasta, commit, ref sem forçar; se o ramo andou no meio, refaz por cima).
+- Etapas: só a linha `estado` muda (ativa · edicao · kanban · feita · guardada). O Kanban grava as três colunas de
+  `## Plano` de uma vez, cada tarefa um item `- texto`.
 
 ## Arquivos
 
     index.html  estilo.css  config.js
-    js/app.js        interface (mapa, abas, painel, gaveta, atalhos, teclado)
+    js/app.js        interface (mapa, abas, painel, gaveta, atalhos, teclado, troca de etapa, apagar direção)
+    js/etapas.js     páginas Edição e Kanban
+    js/plano.js      tarefas do plano de ação (ler, escrever, mover)
     js/formato.js    frontmatter e seções do markdown
     js/modelo.js     arquivos → árvore de ideias e direções
     js/sync.js       fila de gravação, conflitos, indicador salvo/salvando

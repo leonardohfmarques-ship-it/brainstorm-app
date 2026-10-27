@@ -136,6 +136,34 @@ export class GitHubBackend {
     return { sha: novo };
   }
 
+  // apaga uma pasta inteira (direção, direções dentro, anexos) num commit só, pela Git Data API.
+  // Lê a árvore na hora, então leva junto o que o Claude tenha criado lá dentro depois do carregamento.
+  async apagar(base, message) {
+    const pref = String(base).replace(/\/+$/, '') + '/';
+    const ramo = encodeURIComponent(this.branch);
+    for (let t = 0; t < 3; t++) {
+      const ref = await this.api(`${this.raiz}/git/ref/heads/${ramo}`);
+      const head = ref.object.sha;
+      const commit = await this.api(`${this.raiz}/git/commits/${head}`);
+      const tree = await this.api(`${this.raiz}/git/trees/${commit.tree.sha}?recursive=1`);
+      if (tree.truncated) throw new ErroAPI('outro', 'O repositório ficou grande demais para apagar por aqui.');
+      const alvos = (tree.tree || []).filter(i => i.type === 'blob' && i.path.startsWith(pref));
+      if (!alvos.length) return { apagados: 0 };
+      const nova = await this.api(`${this.raiz}/git/trees`, { method: 'POST', body: {
+        base_tree: commit.tree.sha, tree: alvos.map(i => ({ path: i.path, mode: i.mode || '100644', type: 'blob', sha: null })) } });
+      const c = await this.api(`${this.raiz}/git/commits`, { method: 'POST', body: { message, tree: nova.sha, parents: [head] } });
+      try {
+        await this.api(`${this.raiz}/git/refs/heads/${ramo}`, { method: 'PATCH', body: { sha: c.sha, force: false } });
+      } catch (e) {
+        if (e.status === 422 || e.tipo === 'conflito') continue; // alguém gravou no meio: refaz por cima do novo
+        throw e;
+      }
+      for (const i of alvos) this.indice.delete(i.path);
+      return { apagados: alvos.length };
+    }
+    throw new ErroAPI('conflito', 'O GitHub mudou várias vezes seguidas. Tenta de novo.');
+  }
+
   // anexo: busca o blob pela API e devolve um object URL (repositório privado não tem link direto)
   async anexoURL(path) {
     const it = this.indice.get(path); if (!it) throw new ErroAPI('naoexiste', 'Anexo não encontrado.');

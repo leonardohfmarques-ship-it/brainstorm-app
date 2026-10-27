@@ -34,6 +34,7 @@ export class Store {
     this.status = 'salvo'; this.erro = null;
     this.voando = false; this.timer = 0; this.retry = 0;
     this.ouvintes = new Set();
+    this.ocultos = new Set(); // pastas que somem da tela enquanto o "Desfazer" está valendo
     this.model = { ideias: [], erros: [], porBase: new Map() };
   }
   on(fn) { this.ouvintes.add(fn); return () => this.ouvintes.delete(fn); }
@@ -47,9 +48,10 @@ export class Store {
     this.anexos = r.anexos; this.rev = r.rev; this.truncado = r.truncado;
     this.reconstruir();
   }
+  oculto(p) { for (const b of this.ocultos) if (p.startsWith(b + '/')) return true; return false; }
   reconstruir() {
-    const m = new Map([...this.files].map(([p, f]) => [p, { text: f.text }]));
-    this.model = construir(m, this.anexos);
+    const m = new Map([...this.files].filter(([p]) => !this.oculto(p)).map(([p, f]) => [p, { text: f.text }]));
+    this.model = construir(m, this.anexos.filter(a => !this.oculto(a.path)));
     let mapa = {};
     const f = this.files.get(MAPA);
     if (f) { try { mapa = JSON.parse(f.text) || {}; } catch (e) { mapa = {}; } }
@@ -85,6 +87,19 @@ export class Store {
     this.reconstruir(); this.agendar();
   }
 
+  // apagar em dois tempos: ocultar (some na hora, dá para desfazer) e depois apagarPasta (vai para o GitHub)
+  ocultar(base) { this.ocultos.add(base); this.reconstruir(); }
+  mostrar(base) { this.ocultos.delete(base); this.reconstruir(); }
+  apagarPasta(base, msg) {
+    this.ocultos.delete(base);
+    const dentro = p => p.startsWith(base + '/');
+    for (const p of [...this.files.keys()]) if (dentro(p)) this.files.delete(p);
+    for (const p of [...this.pend.keys()]) if (dentro(p)) this.pend.delete(p);
+    this.anexos = this.anexos.filter(a => !dentro(a.path));
+    this.pend.set('apagar:' + base, { apagar: base, patch: null, msgs: [msg] });
+    this.reconstruir(); this.agendar();
+  }
+
   agendar(ms = ESPERA) {
     clearTimeout(this.timer);
     if (this.status !== 'erro' && this.status !== 'offline') this.setStatus('salvando');
@@ -106,7 +121,7 @@ export class Store {
         if (e.tipo !== 'naoexiste') {
           const cur = this.pend.get(path);
           this.pend.delete(path);
-          this.pend.set(path, cur ? { patch: juntar(job.patch, cur.patch), criar: job.criar || cur.criar, inicial: job.inicial || cur.inicial, msgs: job.msgs.concat(cur.msgs) } : job);
+          this.pend.set(path, cur && !job.apagar ? { patch: juntar(job.patch, cur.patch), criar: job.criar || cur.criar, inicial: job.inicial || cur.inicial, msgs: job.msgs.concat(cur.msgs) } : job);
         }
         falha = e; break;
       }
@@ -121,6 +136,7 @@ export class Store {
   }
 
   async enviar(path, job) {
+    if (job.apagar) { await this.b.apagar(job.apagar, mensagem(job.msgs)); return; }
     const f = this.files.get(path); if (!f) return;
     const msg = mensagem(job.msgs.length ? job.msgs : ['App: atualiza ' + path]);
     for (let t = 0; t < 3; t++) {

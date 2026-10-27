@@ -384,3 +384,166 @@ textarea.cru:focus-visible{box-shadow:0 0 0 3px var(--paper),0 0 0 5px var(--ink
   .entrada{place-items:start center}
   .estado h2{font-size:24px}
 }
+
+/* =========================================================================
+   Etapas: Brainstorm → Edição → Kanban (mesma linguagem de metrô)
+   ========================================================================= */
+/* troca de etapa no topo: três estações numa linha */
+.etapas{display:flex;align-items:center;flex:none;padding:0 6px 0 2px}
+.et{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 9px;border:0;border-radius:999px;background:none;cursor:pointer;color:var(--gray);font:500 14px/1 var(--sans);white-space:nowrap}
+.et:hover{color:var(--ink);background:var(--faint)}
+.et-d{width:14px;height:14px;border-radius:50%;border:3px solid var(--ink);background:var(--paper);flex:none;transition:background .15s}
+.et-c{font:500 11px/1 var(--mono);min-width:18px;height:18px;padding:0 4px;border-radius:999px;border:1.5px solid currentColor;display:inline-grid;place-items:center}
+.et-c:empty{display:none}
+.et.is-on{color:var(--ink);font-weight:800}
+.et.is-on .et-d{background:var(--ink)}
+.et.is-on .et-c{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.et-l{width:14px;height:3px;background:var(--ink);border-radius:2px;flex:none;margin:0 -3px}
+.crumbs li:first-child,.crumb.home{flex:none;max-width:none}
+
+.main.is-etapa{grid-template-columns:minmax(0,1fr)}
+.main.is-etapa > .map,.main.is-etapa > .panel{display:none}
+.etapa{display:grid;grid-template-columns:clamp(240px,22vw,300px) minmax(0,1fr);min-height:0;background:var(--bg)}
+
+/* lista lateral das ideias da etapa */
+.et-lista{border-right:2px solid var(--ink);overflow-y:auto;min-height:0;padding:0 0 24px}
+.et-lh{padding:22px 20px 14px;border-bottom:2px solid var(--ink)}
+.et-lh h2{margin:0;font:800 30px/1 var(--sans);letter-spacing:-.01em}
+.et-lh p{margin:6px 0 0;font:400 11px/1.3 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--gray)}
+.et-lista ul{list-style:none;margin:0;padding:0}
+.et-gn{margin:20px 20px 6px}
+.et-i{position:relative;display:grid;grid-template-columns:auto 1fr;gap:3px 12px;align-items:center;width:100%;text-align:left;border:0;border-bottom:1.5px solid rgba(17,17,17,.15);background:none;padding:13px 16px 13px 20px;cursor:pointer}
+.et-i .bul{grid-row:1 / span 2}
+.et-i .t{font:500 16px/1.2 var(--sans);text-wrap:balance}
+.et-i .m{font:400 11px/1.2 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--gray)}
+.et-i:hover{background:var(--faint)}
+.et-i.is-sel{background:var(--paper)}
+.et-i.is-sel::before{content:"";position:absolute;left:0;top:0;bottom:0;width:6px;background:var(--c)}
+.et-i.is-sel .t{font-weight:800}
+.et-i.is-sel .bul{border-width:4px}
+.et-i:focus-visible{box-shadow:inset 0 0 0 2px var(--ink)}
+
+/* corpo da etapa */
+.et-corpo{overflow-y:auto;min-height:0;overscroll-behavior:contain}
+.et-in{padding:26px 32px 48px;max-width:1180px}
+.et-h{margin:0 0 20px}
+.et-h .pmeta{margin-bottom:8px}
+.et-h .ph{margin-bottom:14px;font-size:clamp(32px,3vw,46px)}
+.et-h .actions{margin:0}
+.btn[disabled]{opacity:.42;cursor:not-allowed}
+.btn[disabled]:hover{background:var(--bg);color:var(--ink)}
+.btn--solid[disabled]:hover{background:var(--ink);color:var(--bg)}
+.btn--perigo:hover{background:var(--yt);border-color:var(--yt);color:#fff}
+.btn--ghost.btn--perigo{color:var(--gray)}
+.btn--ghost.btn--perigo:hover{background:var(--yt);color:#fff}
+.et-vazio{max-width:440px;margin:12vh auto 0;padding:0 24px}
+.et-vazio svg{display:block;width:100%;height:60px;margin:0 0 14px}
+.et-vazio h2{margin:0 0 8px;font:800 34px/1 var(--sans);letter-spacing:-.01em}
+.et-vazio p{margin:0 0 18px;color:var(--gray);font-size:16px}
+
+/* Edição */
+.aviso{border:2px dashed var(--ink);border-radius:10px;background:var(--paper);padding:14px 18px 16px;margin:0 0 22px;max-width:720px}
+.aviso p{margin:0 0 10px;font:500 17px/1.35 var(--sans)}
+.aviso .cmd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 10px}
+.aviso code{font:500 15px/1.3 var(--mono);background:var(--lap);padding:6px 10px;border-radius:6px;overflow-wrap:anywhere}
+.aviso small{display:block;font:400 12px/1.45 var(--mono);color:var(--gray);max-width:60ch}
+.ed-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:22px;align-items:start}
+.ed-t{margin:0 0 10px;font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--gray)}
+.esc{background:var(--paper)}
+.esc .layer-h{border-bottom-color:var(--ink);box-shadow:inset 0 6px 0 var(--c);padding-top:14px}
+.plano{background:var(--paper)}
+.plano .layer-h{box-shadow:inset 0 6px 0 var(--c);padding-top:14px}
+.plano-l{margin:0 0 14px;padding-left:26px;font:500 16px/1.35 var(--sans)}
+.plano-l li{margin:0 0 7px;padding-left:4px}
+.plano-l li::marker{font:500 12px/1 var(--mono);color:var(--gray)}
+.layer-b .nota{display:block;font:400 12px/1.4 var(--mono);color:var(--gray)}
+.campo-v{display:block;border:2px solid transparent;border-radius:8px;margin:-8px -10px;padding:8px 10px;cursor:text}
+.campo-v:hover{border-color:rgba(17,17,17,.2);background:rgba(255,255,255,.5)}
+.campo-v:focus-visible{border-color:var(--ink)}
+.campo-v .md{font-size:16px}
+.campo-vazio{display:block;width:100%;text-align:left;border:2px dashed rgba(17,17,17,.35);border-radius:8px;background:transparent;padding:12px 14px;cursor:text;font:500 15px/1.4 var(--sans);color:var(--gray)}
+.campo-vazio:hover{border-color:var(--ink);color:var(--ink)}
+.bruto .campo-v .md,.bruto .campo-vazio{font-size:15px}
+.fala.sm-ed{font-size:18px}
+details.dobra > summary{list-style:none;cursor:pointer}
+details.dobra > summary::-webkit-details-marker{display:none}
+details.dobra:not([open]) > summary{border-bottom:0}
+details.dobra[open] .mini{visibility:hidden}
+.ed-dirs{list-style:none;margin:0;padding:0}
+.ed-dirs li{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:start;padding:10px 0;border-bottom:1.5px solid rgba(17,17,17,.15)}
+.ed-dirs li:last-child{border-bottom:0}
+.ed-dirs b{display:block;font:800 16px/1.2 var(--sans);margin:2px 0 3px}
+.ed-dirs small{display:block;font:500 13.5px/1.4 var(--sans);color:var(--gray)}
+.ed-dirs .btn{padding:0 8px}
+
+/* Kanban */
+.et-in--kb{max-width:none}
+.prog{position:relative;height:6px;margin:0 0 16px;max-width:520px;border-radius:3px;background:linear-gradient(90deg,var(--ink) 50%,transparent 0) 0 50%/12px 2px repeat-x}
+.prog span{position:absolute;left:0;top:0;bottom:0;background:var(--c);border-radius:3px;min-width:0;transition:width .3s var(--out)}
+.board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;align-items:start}
+.col{border:2px solid var(--ink);border-radius:10px;background:var(--bg);min-width:0;transition:box-shadow .12s}
+.col.is-alvo{box-shadow:0 0 0 3px var(--lap)}
+.col-h{display:flex;align-items:center;gap:10px;padding:12px 14px 11px;border-bottom:2px solid var(--ink);box-shadow:inset 0 6px 0 var(--c);padding-top:16px}
+.col-h h2{margin:0;flex:1;font:800 17px/1 var(--sans);letter-spacing:.06em;text-transform:uppercase}
+.col-d{width:16px;height:16px;border-radius:50%;border:4px solid var(--c);background:var(--paper);flex:none}
+.col--feito .col-d{background:var(--c)}
+.col-b{position:relative;list-style:none;margin:0;padding:14px 12px 4px 0;min-height:86px}
+/* a linha do metrô: tracejada em "A fazer" (em obras), cheia em "Fazendo" e "Feito" */
+.col-b::before{content:"";position:absolute;left:23px;top:0;bottom:0;width:6px;margin-left:-3px;background:var(--c);border-radius:3px}
+.col--afazer .col-b::before{background:linear-gradient(var(--c) 55%,transparent 0) 0 0/6px 14px repeat-y}
+.card{position:relative;display:grid;grid-template-columns:46px minmax(0,1fr);align-items:start;margin:0 0 10px;outline:none;border-radius:8px;touch-action:auto}
+.card-d{position:relative;z-index:1;justify-self:center;margin-top:12px;width:18px;height:18px;border-radius:50%;border:4px solid var(--c);background:var(--paper);touch-action:none;cursor:grab}
+.col--feito .card-d{background:var(--c)}
+.col--fazendo .card-d::before{content:"";position:absolute;inset:-8px;border-radius:50%;border:2px solid var(--c);animation:ping 1.6s var(--out) infinite}
+.card-c{background:var(--paper);border:2px solid var(--ink);border-radius:8px;padding:9px 10px 6px 12px;cursor:grab;min-width:0}
+.card-t{font:500 15.5px/1.35 var(--sans);overflow-wrap:anywhere;text-wrap:pretty}
+.col--feito .card-t{color:var(--gray)}
+.card-x{margin-top:4px;font:400 12px/1.4 var(--mono);color:var(--gray);overflow-wrap:anywhere}
+/* barra do cartão: flutua embaixo do cartão (não empurra nada ao aparecer) */
+.card-c{position:relative}
+.card-b{position:absolute;z-index:3;right:8px;bottom:-22px;display:flex;align-items:center;gap:0;padding:0 3px;height:28px;background:var(--paper);border:2px solid var(--ink);border-radius:999px;opacity:0;pointer-events:none;transition:opacity .12s}
+.card:hover .card-b,.card:focus-within .card-b,.card:focus .card-b{opacity:1;pointer-events:auto}
+.card:hover,.card:focus-within{z-index:4}
+.card-b button{width:26px;height:24px;border:0;border-radius:6px;background:none;display:grid;place-items:center;cursor:pointer;color:var(--ink)}
+.card-b button .ico{width:16px;height:16px}
+.card-b button:hover{background:var(--faint)}
+.card-b button.perigo:hover{background:var(--yt);color:#fff}
+.card-b button[disabled]{opacity:.25;cursor:default;background:none}
+.card-b .sp{width:1px;height:16px;background:rgba(17,17,17,.25);margin:0 3px}
+.card:focus-visible{box-shadow:none}
+.card:focus-visible .card-c{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--ink)}
+.card.is-vaga .card-c{border-style:dashed;background:transparent}
+.card.is-vaga .card-c > *{visibility:hidden}
+.card.is-vaga .card-d{border-style:dashed}
+.card--fantasma{position:fixed;left:0;top:0;z-index:60;pointer-events:none;margin:0;grid-template-columns:46px minmax(0,1fr)}
+.card--fantasma .card-c{box-shadow:0 10px 24px rgba(17,17,17,.18);cursor:grabbing}
+.card--fantasma .card-b{display:none}
+body.is-arrastando,body.is-arrastando *{cursor:grabbing!important;user-select:none;-webkit-user-select:none}
+.card-in{display:block;width:100%;border:0;background:transparent;resize:none;padding:0;font:500 15.5px/1.35 var(--sans);color:var(--ink);field-sizing:content;min-height:42px;outline:none}
+.card.is-ed .card-c,.card--novo .card-c{box-shadow:0 0 0 3px var(--lap);cursor:text}
+.card--novo .card-d{border-style:dashed}
+.col-add{display:flex;align-items:center;gap:8px;width:calc(100% - 24px);margin:0 12px 12px;height:36px;padding:0 12px;border:2px dashed rgba(17,17,17,.35);border-radius:8px;background:none;cursor:pointer;font:500 14px/1 var(--sans);color:var(--gray)}
+.col-add:hover{border-color:var(--ink);color:var(--ink);background:var(--paper)}
+.kb-dica{display:flex;gap:16px;flex-wrap:wrap;margin:16px 0 0;font:400 11px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--gray)}
+
+/* aviso com ação (Desfazer) */
+.toast-b{border:0;background:none;color:var(--lap);font:800 14px/1 var(--sans);padding:2px 0 2px 6px;margin-left:4px;border-left:1.5px solid rgba(250,250,247,.35);cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+.toast-b:hover{color:#fff}
+.toast-b:focus-visible{box-shadow:0 0 0 2px var(--lap);border-radius:3px}
+
+@media (hover:none){.card-b{position:static;opacity:1;pointer-events:auto;border:0;background:none;justify-content:flex-start;margin:6px -6px 0;padding:0}}
+@media (max-width:1180px){
+  .ed-grid{grid-template-columns:minmax(0,1fr)}
+  .et-n{display:none}
+  .et{padding:0 7px}
+}
+@media (max-width:900px){
+  .board{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:760px){
+  .etapa{grid-template-columns:minmax(0,1fr)}
+  .et-lista{border-right:0;border-bottom:2px solid var(--ink);max-height:none}
+  .et-corpo{overflow:visible}
+  .et-in{padding:20px 16px 32px}
+  .date{display:none}
+}

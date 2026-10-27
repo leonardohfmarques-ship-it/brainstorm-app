@@ -3,6 +3,7 @@
 import { ErroAPI } from './github.js';
 
 const OVERLAY = 'bs-local-overlay';
+const APAGADOS = 'bs-local-apagados'; // pastas apagadas neste navegador
 function lerOverlay() { try { return JSON.parse(localStorage.getItem(OVERLAY) || '{}') || {}; } catch (e) { return {}; } }
 function gravarOverlay(o) { try { localStorage.setItem(OVERLAY, JSON.stringify(o)); } catch (e) { /* sem armazenamento: fica só na memória */ } }
 
@@ -11,6 +12,8 @@ export function hash(s) {
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
   return 'local-' + (h >>> 0).toString(16);
 }
+function lerApagados() { try { const v = JSON.parse(localStorage.getItem(APAGADOS) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; } }
+function gravarApagados(a) { try { localStorage.setItem(APAGADOS, JSON.stringify(a)); } catch (e) { /* só na memória */ } }
 const caminho = p => p.split('/').map(encodeURIComponent).join('/');
 const espera = ms => new Promise(r => setTimeout(r, ms));
 
@@ -20,10 +23,12 @@ export class LocalBackend {
     this.base = base.endsWith('/') ? base : base + '/';
     this.atraso = atraso;
     this.overlay = lerOverlay();
+    this.apagados = lerApagados();
     this.indice = new Map();
     this.commits = [];
   }
   async testar() { return true; }
+  apagado(p) { return this.apagados.some(b => p.startsWith(b + '/')); }
 
   async listar(dir) {
     let res;
@@ -52,14 +57,14 @@ export class LocalBackend {
     const todos = await this.listar('ideias/');
     const ehTexto = p => /(^|\/)(ideia|direcao)\.md$/.test(p) || p === 'ideias/mapa-geral.json';
     const files = new Map();
-    await Promise.all(todos.filter(ehTexto).map(async p => {
+    await Promise.all(todos.filter(p => ehTexto(p) && !this.apagado(p)).map(async p => {
       const r = await fetch(this.base + caminho(p), { cache: 'no-store' });
       const text = await r.text();
       files.set(p, { text, sha: hash(text) });
     }));
     // o que foi gravado neste navegador passa por cima
-    for (const [p, text] of Object.entries(this.overlay)) files.set(p, { text, sha: hash(text) });
-    const anexos = todos.filter(p => !ehTexto(p) && p.includes('/anexos/')).map(p => ({ path: p, sha: hash(p), size: 0 }));
+    for (const [p, text] of Object.entries(this.overlay)) if (!this.apagado(p)) files.set(p, { text, sha: hash(text) });
+    const anexos = todos.filter(p => !ehTexto(p) && p.includes('/anexos/') && !this.apagado(p)).map(p => ({ path: p, sha: hash(p), size: 0 }));
     this.indice = new Map(anexos.map(a => [a.path, a]));
     let mapa = null;
     if (files.has('ideias/mapa-geral.json')) { try { mapa = JSON.parse(files.get('ideias/mapa-geral.json').text); } catch (e) { mapa = null; } }
@@ -70,6 +75,7 @@ export class LocalBackend {
   async revisao() { return null; }
 
   async ler(path) {
+    if (this.apagado(path)) return null;
     if (this.overlay[path] != null) return { text: this.overlay[path], sha: hash(this.overlay[path]) };
     const r = await fetch(this.base + caminho(path), { cache: 'no-store' });
     if (r.status === 404) return null;
@@ -84,7 +90,21 @@ export class LocalBackend {
     return { sha: hash(text) };
   }
 
+  // apaga a pasta só neste navegador: os arquivos de verdade não mudam
+  async apagar(base, message) {
+    await espera(this.atraso);
+    const b = String(base).replace(/\/+$/, '');
+    if (!this.apagados.includes(b)) this.apagados.push(b);
+    gravarApagados(this.apagados);
+    let n = 0;
+    for (const p of Object.keys(this.overlay)) if (p.startsWith(b + '/')) { delete this.overlay[p]; n++; }
+    gravarOverlay(this.overlay);
+    for (const p of [...this.indice.keys()]) if (p.startsWith(b + '/')) { this.indice.delete(p); n++; }
+    this.commits.push({ path: b, message, apagou: true, quando: Date.now() });
+    return { apagados: n };
+  }
+
   async anexoURL(path) { return this.base + caminho(path); }
   anexoHref(path) { return this.base + caminho(path); }
-  descartar() { this.overlay = {}; try { localStorage.removeItem(OVERLAY); } catch (e) { /* nada */ } }
+  descartar() { this.overlay = {}; this.apagados = []; try { localStorage.removeItem(OVERLAY); localStorage.removeItem(APAGADOS); } catch (e) { /* nada */ } }
 }

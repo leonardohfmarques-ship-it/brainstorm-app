@@ -1,5 +1,6 @@
 // Monta a árvore de ideias e direções a partir dos arquivos de ideias/ (contrato em docs/FORMATO.md).
 import { abrir, lerCampos, lerSecao } from './formato.js';
+import { lerTarefas } from './plano.js';
 
 export const AREAS = [
   { id: 'youtube', nome: 'YouTube', c: '#E2231A', b: 'Y' },
@@ -12,6 +13,13 @@ export const AREA = Object.fromEntries(AREAS.map(a => [a.id, a]));
 const RE_IDEIA = /^ideias\/([^/]+)\/([^/]+)\/ideia\.md$/;
 const RE_DIR = /^(.+)\/direcoes\/([^/]+)\/direcao\.md$/;
 const RE_ANEXO = /^(.+?)\/anexos\/(.+)$/;
+
+// estados de uma ideia: ativa (Brainstorm), guardada (gaveta), edicao, kanban, feita. O resto vira ativa.
+export const ESTADOS = ['ativa', 'guardada', 'edicao', 'kanban', 'feita'];
+export function lerEstado(v) {
+  const e = String(v == null ? '' : v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  return ESTADOS.includes(e) ? e : 'ativa';
+}
 
 const num = v => { const n = Number(v); return Number.isFinite(n) ? n : null; };
 const par = v => Array.isArray(v) && v.length === 2 && v.every(x => typeof x === 'number' && Number.isFinite(x)) ? v : null;
@@ -57,11 +65,22 @@ export function construir(files, anexos = []) {
       const doc = abrir(files.get(p).text);
       Object.assign(n, {
         kind: 'ideia', key: m[1] + '/' + m[2], slug: m[2], area, pasta: m[1],
-        estado: String(n.campos.estado || 'ativa').trim() === 'guardada' ? 'guardada' : 'ativa',
+        estado: lerEstado(n.campos.estado),
         criada: String(n.campos.criada || '').trim(), codigo: String(n.campos.codigo || '').trim(),
         fala: separarFala(lerSecao(doc, ['Bruto', 'Fala']) || ''),
         brutoAnexos: lerSecao(doc, ['Bruto', 'Anexos']) || '',
-        resumo: lerSecao(doc, ['Lapidado', 'Resumo']) || ''
+        resumo: lerSecao(doc, ['Lapidado', 'Resumo']) || '',
+        edicao: {
+          existe: lerSecao(doc, ['Edição']) != null,
+          escolhas: lerSecao(doc, ['Edição', 'Escolhas']) || '',
+          versao: lerSecao(doc, ['Edição', 'Versão final']) || ''
+        },
+        plano: {
+          afazer: lerTarefas(lerSecao(doc, ['Plano', 'A fazer'])),
+          fazendo: lerTarefas(lerSecao(doc, ['Plano', 'Fazendo'])),
+          feito: lerTarefas(lerSecao(doc, ['Plano', 'Feito']))
+        },
+        temPlano: lerSecao(doc, ['Plano']) != null
       });
       if (!n.titulo) n.titulo = m[2].replace(/-/g, ' ');
       ideias.push(n); porBase.set(n.base, n);

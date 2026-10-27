@@ -6,6 +6,8 @@ import { Store } from './sync.js';
 import { AREAS, AREA, temPedido } from './modelo.js';
 import { slug as fazerSlug, novaDirecao } from './formato.js';
 import { md, hidratar } from './markdown.js';
+import { criarEtapas, nomeEtapa } from './etapas.js';
+import { total as totalTarefas } from './plano.js';
 
 const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 const RM = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -19,7 +21,15 @@ const ICON = {
   drawer: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 13h5l1.5 2.5h5L16 13h5"/><path d="M5 5h14l2 8v6H3v-6z"/></svg>',
   back: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l-6 6 6 6"/><path d="M3 12h11a6 6 0 0 1 6 6"/></svg>',
   link: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>',
-  x: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>'
+  x: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  trash: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg>',
+  edicao: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h13"/><path d="M12 7l5 5-5 5"/><circle cx="20" cy="12" r="1.6"/></svg>',
+  kanban: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v16M12 4v10M19 4v6"/><circle cx="5" cy="20" r="1.5"/><circle cx="12" cy="14" r="1.5"/><circle cx="19" cy="10" r="1.5"/></svg>',
+  check: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  esq: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>',
+  dir: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
+  cima: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>',
+  baixo: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>'
 };
 
 /* ---------------- armazenamento local (só conveniências deste navegador) ---------------- */
@@ -36,9 +46,10 @@ const params = new URLSearchParams(location.search);
 const LOCAL = params.has('local');
 
 let backend = null, store = null;
-const UI = Object.assign({ path: [], sel: null }, ls.get('bs-ui', {}));
+const UI = Object.assign({ path: [], sel: null, etapa: 'brainstorm', ed: null, kb: null }, ls.get('bs-ui', {}));
+if (!['brainstorm', 'edicao', 'kanban'].includes(UI.etapa)) UI.etapa = 'brainstorm';
 UI.hl = null;
-const saveUI = () => ls.set('bs-ui', { path: UI.path, sel: UI.sel });
+const saveUI = () => ls.set('bs-ui', { path: UI.path, sel: UI.sel, etapa: UI.etapa, ed: UI.ed, kb: UI.kb });
 const M = () => store.model;
 
 /* ---------------- dados → tela ---------------- */
@@ -668,10 +679,10 @@ function renderBody(anim) {
   h += `<h1 class="ph" id="ph">${esc(target.titulo)}</h1>`;
   if (targetIsIdea) {
     h += `<p class="pmeta">${ideaCode(idea) ? `<b>${esc(ideaCode(idea))}</b>` : ''}<span>${esc(areaNome(idea.area))}</span>${idea.criada ? `<span>criada ${fmtData(idea.criada)}</span>` : ''}<span>ativa</span>${idea.pedido ? '<span>pedido ao Claude</span>' : ''}</p>`;
-    h += `<div class="actions"><button class="btn btn--sm" data-act="renomear">${ICON.pen}Renomear</button><button class="btn btn--sm" data-act="guardar">${ICON.drawer}Guardar na gaveta</button></div>`;
+    h += `<div class="actions"><button class="btn btn--sm" data-act="renomear">${ICON.pen}Renomear</button><button class="btn btn--sm" data-act="guardar">${ICON.drawer}Guardar na gaveta</button><button class="btn btn--sm" data-act="decidir" title="A ideia sai do mapa e vai para a página Edição">${ICON.edicao}Decidir → Edição</button></div>`;
   } else {
     h += `<p class="pmeta"><b>${esc(codigoDir(idea, tcode))}</b><span>direção</span>${tkids.length ? `<span>${tkids.length} direções dentro</span>` : ''}${!target.lapidado ? '<span>criada por ti</span>' : ''}</p>`;
-    h += `<div class="actions"><button class="btn btn--sm" data-act="renomear">${ICON.pen}Renomear</button>${d && !d.provisorio ? `<button class="btn btn--sm${tkids.length ? ' btn--solid' : ''}" data-act="abrir" title="${tkids.length ? 'Mergulha nesta direção' : 'Mergulha nesta direção para criar direções dentro dela'}">${ICON.dive}Abrir direção</button>` : ''}${!d && !isIdea ? `<button class="btn btn--sm" data-act="voltar">${ICON.back}Voltar um nível</button>` : ''}</div>`;
+    h += `<div class="actions"><button class="btn btn--sm" data-act="renomear">${ICON.pen}Renomear</button>${d && !d.provisorio ? `<button class="btn btn--sm${tkids.length ? ' btn--solid' : ''}" data-act="abrir" title="${tkids.length ? 'Mergulha nesta direção' : 'Mergulha nesta direção para criar direções dentro dela'}">${ICON.dive}Abrir direção</button>` : ''}${!d && !isIdea ? `<button class="btn btn--sm" data-act="voltar">${ICON.back}Voltar um nível</button>` : ''}<button class="btn btn--sm btn--perigo" data-act="apagar" title="Some do mapa na hora; dá para desfazer por alguns segundos">${ICON.trash}Apagar direção</button></div>`;
   }
   // BRUTO
   h += `<section class="layer bruto" aria-labelledby="lb"><header class="layer-h"><b id="lb">Bruto</b><span>teu · intacto</span></header><div class="layer-b">`;
@@ -756,6 +767,8 @@ function bindBody(pin, target, targetIsIdea, d) {
     if (a === 'abrir') navigate([...UI.path, d.slug], { dir: 'in', node: G.byId['d:' + d.slug] });
     if (a === 'voltar') goUp();
     if (a === 'guardar') guardar(target);
+    if (a === 'decidir') mudarEstado(target, 'edicao');
+    if (a === 'apagar') apagarDirecao(target);
     if (a === 'editar-lap') { lapEditando = file; renderBody(false); const c = $('#lapCru'); if (c) { c.focus(); c.setSelectionRange(0, 0); } }
     if (a === 'fechar-lap') { lapEditando = null; renderBody(false); }
     if (a === 'desenvolver') {
@@ -901,6 +914,101 @@ $('#btnGaveta').addEventListener('click', openGaveta);
 $('#btnFechaGaveta').addEventListener('click', closeGaveta);
 scrim.addEventListener('click', closeGaveta);
 
+/* ---------------- etapas: Brainstorm → Edição → Kanban ---------------- */
+const etapaEl = $('#etapa');
+const etapas = criarEtapas({
+  UI, saveUI, store: () => store, backend: () => backend, esc, ICON, toast, linkar, fmtData, fmtDataBR, rebaixar, plural, areaNome,
+  irPara: (e, k) => irPara(e, k), mudarEstado: (i, e) => mudarEstado(i, e), apagarDirecao: d => apagarDirecao(d), renderNav: () => renderNav()
+});
+function renderNav() {
+  if (!store || !store.rev) { document.querySelectorAll('.et').forEach(b => { b.classList.toggle('is-on', b.dataset.etapa === UI.etapa); b.querySelector('.et-c').textContent = ''; }); return; }
+  const conta = { brainstorm: M().ideias.filter(i => i.estado === 'ativa').length, edicao: etapas.contar('edicao'), kanban: etapas.contar('kanban') };
+  document.querySelectorAll('.et').forEach(b => {
+    const e = b.dataset.etapa, on = e === UI.etapa;
+    b.classList.toggle('is-on', on);
+    if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+    $('#etC-' + e).textContent = conta[e];
+    b.setAttribute('aria-label', `${nomeEtapa(e)}: ${conta[e]}`);
+  });
+}
+function irPara(etapa, key) {
+  if (!store || busy) return;
+  if (renaming) renaming.input.blur();
+  closeAtalhos(); closeGaveta();
+  if (etapa === 'edicao' && key) UI.ed = key;
+  if (etapa === 'kanban' && key) UI.kb = key;
+  const mudou = UI.etapa !== etapa;
+  UI.etapa = etapa; if (mudou) etapas.soltar(); saveUI();
+  renderAll({ enter: mudou && etapa === 'brainstorm', panelIn: mudou && etapa === 'brainstorm' && UI.path.length > 0 });
+}
+document.querySelectorAll('.et').forEach(b => b.addEventListener('click', () => irPara(b.dataset.etapa)));
+renderNav();
+function flash(id) { const n = G.byId[id]; if (n && n.el) { n.el.classList.add('pulse'); setTimeout(() => n.el.classList.remove('pulse'), 1200); } }
+
+// troca de etapa de uma ideia: só a linha "estado" do arquivo muda
+function mudarEstado(idea, estado) {
+  const de = idea.estado, key = idea.key, t = idea.titulo;
+  const msg = estado === 'ativa' ? `App: volta a ideia "${t}" para o Brainstorm`
+    : estado === 'edicao' ? (de === 'ativa' ? `App: manda a ideia "${t}" para a Edição` : `App: volta "${t}" para a Edição`)
+    : estado === 'kanban' ? (de === 'feita' ? `App: reabre "${t}" no Kanban` : `App: manda "${t}" para o Kanban`)
+    : `App: conclui a ideia "${t}"`;
+  store.remendar(idea.file, { fm: { estado } }, msg);
+  if (estado === 'edicao' && de === 'ativa') {
+    UI.ed = key; saveUI(); renderNav();
+    toast(`Foi para a Edição: “${t}”.`, { acao: 'Abrir a Edição', fn: () => irPara('edicao', key) });
+    if (UI.etapa === 'brainstorm') navigate([], { dir: 'out' }); else renderAll();
+    return;
+  }
+  if (estado === 'ativa') {
+    UI.path = []; UI.sel = null; saveUI(); renderAll();
+    toast('Voltou ao Brainstorm.', { acao: 'Ver no mapa', fn: () => { irPara('brainstorm'); setTimeout(() => flash('i:' + key), RM.matches ? 0 : 700); } });
+    return;
+  }
+  if (estado === 'kanban' && de === 'edicao') { irPara('kanban', key); toast(`No Kanban: ${plural(totalTarefas(idea.plano), 'tarefa', 'tarefas')} em A fazer.`); return; }
+  if (estado === 'edicao') { irPara('edicao', key); toast('Voltou para a Edição.'); return; }
+  renderAll();
+  toast(estado === 'feita' ? 'Concluída. Fica em “Concluídas”, no Kanban.' : 'Reaberta no Kanban.');
+}
+
+/* ---------------- apagar direção: some na hora, "Desfazer" por alguns segundos, depois vai para o GitHub ---------------- */
+const DESFAZER_MS = 8000;
+let adiado = null;
+function efetivarAdiado() { if (!adiado) return; const a = adiado; adiado = null; clearTimeout(a.timer); a.fazer(); }
+function contarDentro(n) { let d = 0, x = n.anexos.length; const walk = k => k.direcoes.forEach(c => { d++; x += c.anexos.length; walk(c); }); walk(n); return { d, x }; }
+function apagarDirecao(dir) {
+  if (!dir || dir.kind !== 'direcao' || busy) return;
+  if (renaming) renaming.input.blur();
+  if (dir.provisorio) { provisorios.delete(dir.file); store.files.delete(dir.file); store.reconstruir(); if (UI.sel === dir.slug) UI.sel = null; saveUI(); renderAll({ keep: true }); return; }
+  efetivarAdiado();
+  const base = dir.base, titulo = dir.titulo;
+  const { d, x } = contarDentro(dir);
+  const extra = [d ? plural(d, 'direção dentro', 'direções dentro') : '', x ? plural(x, 'anexo', 'anexos') : ''].filter(Boolean).join(' e ');
+  // se a direção está aberta (ou contém a aberta), a tela sobe para a mãe dela
+  const antes = { path: UI.path.slice(), sel: UI.sel };
+  let subiu = false;
+  const R = UI.etapa === 'brainstorm' ? resolve(UI.path) : null;
+  if (R) {
+    const k = R.chain.indexOf(dir);
+    if (k > 0) { UI.path = UI.path.slice(0, k); UI.sel = null; subiu = true; }
+    else if (UI.sel === dir.slug) UI.sel = null;
+  }
+  saveUI();
+  store.ocultar(base);
+  renderAll(subiu ? { enter: true } : { keep: true });
+  const msg = `App: apaga a direção "${titulo}"${extra ? ` (com ${extra})` : ''}`;
+  const a = { base, fazer: () => { store.apagarPasta(base, msg); renderNav(); } };
+  a.timer = setTimeout(() => { if (adiado === a) { adiado = null; a.fazer(); } }, DESFAZER_MS);
+  adiado = a;
+  toast(`Apagada: “${titulo}”${extra ? `, com ${extra}` : ''}.`, { acao: 'Desfazer', ms: DESFAZER_MS, fn: () => {
+    if (adiado !== a) return;
+    adiado = null; clearTimeout(a.timer);
+    store.mostrar(base);
+    if (UI.etapa === 'brainstorm') { UI.path = antes.path; UI.sel = antes.sel; saveUI(); }
+    renderAll(subiu ? { enter: true } : { keep: true });
+    toast('Voltou.');
+  } });
+}
+
 /* ---------------- atalhos ---------------- */
 const at = $('#atalhos'), btnAt = $('#btnAtalhos');
 $('#atalhosList').innerHTML = CONFIG.atalhos.map(a => `<li><button class="at" data-onde="${esc(a.onde)}"><b>${esc(a.nome)}</b><span>${esc(a.onde)}</span><i>copiar</i></button></li>`).join('');
@@ -923,6 +1031,16 @@ $('#btnSair').addEventListener('click', () => {
 /* ---------------- topo, interface do mapa ---------------- */
 function renderCrumbs(liveName) {
   const ol = $('#crumbs'); const items = [{ t: 'BRAINSTORM', p: [] }];
+  if (UI.etapa !== 'brainstorm') {
+    const i = etapas.ideiaAberta();
+    const its = [{ t: 'BRAINSTORM', fn: () => irPara('brainstorm') }, { t: i ? i.titulo : nomeEtapa(UI.etapa) }];
+    ol.innerHTML = its.map((it, k) => {
+      const last = k === its.length - 1, cls = `crumb${k === 0 ? ' home' : ''}`;
+      return `<li>${last ? `<span class="${cls}" aria-current="page" title="${esc(it.t)}">${esc(it.t)}</span>` : it.fn ? `<button class="${cls}" data-k="${k}" title="Voltar ao mapa do Brainstorm">${esc(it.t)}</button>` : `<span class="${cls}">${esc(it.t)}</span>`}</li>`;
+    }).join('');
+    ol.querySelectorAll('button[data-k]').forEach(b => b.addEventListener('click', () => { UI.path = []; UI.sel = null; its[+b.dataset.k].fn(); }));
+    return;
+  }
   const R = resolve(UI.path);
   if (R) R.chain.forEach((c, k) => items.push({ t: (k === R.chain.length - 1 && liveName) ? liveName : c.titulo, p: UI.path.slice(0, k + 1) }));
   ol.innerHTML = items.map((it, k) => {
@@ -949,6 +1067,11 @@ function renderMapUI() {
   const bn = $('#btnNova'); if (bn) bn.addEventListener('click', newDirection);
 }
 function renderAll(opt = {}) {
+  renderNav();
+  const emEtapa = UI.etapa !== 'brainstorm';
+  mainEl.classList.toggle('is-etapa', emEtapa);
+  etapaEl.hidden = !emEtapa;
+  if (emEtapa) { renderCrumbs(); renderGaveta(); etapas.render(); return; }
   if (UI.path.length && !resolve(UI.path)) { UI.path = []; UI.sel = null; saveUI(); }
   renderCrumbs(); renderGaveta();
   renderPanel(opt.panelIn);
@@ -976,7 +1099,7 @@ syncBtn.addEventListener('click', async () => {
   await buscarRemoto(true);
 });
 let ultimaBusca = Date.now();
-const editando = () => !!renaming || !!drag || busy || (document.activeElement && document.activeElement.matches && document.activeElement.matches('textarea, input'));
+const editando = () => !!renaming || !!drag || busy || etapas.ocupado() || (document.activeElement && document.activeElement.matches && document.activeElement.matches('textarea, input'));
 async function buscarRemoto(manual) {
   if (!store || store.ocupado || editando()) return;
   ultimaBusca = Date.now();
@@ -992,7 +1115,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 const haPedido = () => !!store && !store.pend.size && M().ideias.some(temPedido);
 setInterval(() => { if (document.visibilityState === 'visible' && Date.now() - ultimaBusca > (haPedido() ? 20000 : 120000)) buscarRemoto(false); }, 10000);
 window.addEventListener('online', () => { if (store && store.pend.size) store.agora(); });
-window.addEventListener('beforeunload', e => { if (store && store.ocupado) { e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('beforeunload', e => { efetivarAdiado(); if (store && store.ocupado) { e.preventDefault(); e.returnValue = ''; } });
 
 /* ---------------- teclado ---------------- */
 document.addEventListener('keydown', e => {
@@ -1003,13 +1126,17 @@ document.addEventListener('keydown', e => {
     if (!sheet.hidden) { closeGaveta(); return; }
     if (!at.hidden) { closeAtalhos(); btnAt.focus(); return; }
     if (typing) { e.target.blur(); return; }
+    if (UI.etapa !== 'brainstorm') return;
     if (UI.path.length) { goUp(); return; }
     if (UI.hl) { UI.hl = null; applyDim(); renderMapUI(); }
     return;
   }
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+  const etapaTecla = { 1: 'brainstorm', 2: 'edicao', 3: 'kanban' }[e.key];
+  if (etapaTecla && !e.repeat) { if (!e.target.closest('.board')) { e.preventDefault(); irPara(etapaTecla); } return; }
+  if (e.key === 'g' || e.key === 'G') { if (!e.repeat) { e.preventDefault(); if (sheet.hidden) openGaveta(); else closeGaveta(); } return; }
+  if (UI.etapa !== 'brainstorm') return;
   if ((e.key === 'n' || e.key === 'N') && UI.path.length && sheet.hidden) { e.preventDefault(); newDirection(); }
-  else if ((e.key === 'g' || e.key === 'G') && !e.repeat) { e.preventDefault(); if (sheet.hidden) openGaveta(); else closeGaveta(); }
   else if (e.key === 'F2' && UI.path.length && sheet.hidden) { e.preventDefault(); startRename(UI.sel || null); }
   else if (!typing && !e.metaKey && !e.ctrlKey && (e.key === '+' || e.key === '=')) { e.preventDefault(); zoomCentro(1.25); }
   else if (!typing && !e.metaKey && !e.ctrlKey && (e.key === '-' || e.key === '_')) { e.preventDefault(); zoomCentro(0.8); }
@@ -1026,14 +1153,21 @@ document.addEventListener('pointerdown', e => { if (!at.hidden && !e.target.clos
 
 /* ---------------- toast, resize ---------------- */
 let toastT = 0;
-function toast(msg) {
+// toast(msg) ou toast(msg, { acao: 'Desfazer', fn, ms }): o botão some junto com o aviso
+function toast(msg, opt = {}) {
   document.querySelectorAll('.toast').forEach(t => t.remove());
-  const t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status'); t.textContent = msg;
-  document.body.appendChild(t); clearTimeout(toastT); toastT = setTimeout(() => t.remove(), 2800);
+  const t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status');
+  const sp = document.createElement('span'); sp.textContent = msg; t.appendChild(sp);
+  if (opt.acao) {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'toast-b'; b.textContent = opt.acao;
+    b.addEventListener('click', () => { t.remove(); opt.fn(); });
+    t.appendChild(b);
+  }
+  document.body.appendChild(t); clearTimeout(toastT); toastT = setTimeout(() => t.remove(), opt.ms || (opt.acao ? 6000 : 2800));
 }
 let rzT = 0;
 const onResize = () => { clearTimeout(rzT); rzT = setTimeout(() => {
-  if (!store || busy || renaming || drag) return;
+  if (!store || busy || renaming || drag || UI.etapa !== 'brainstorm') return;
   const r = mapEl.getBoundingClientRect();
   if (Math.abs(r.width - G.W) > 1 || Math.abs(r.height - G.H) > 1) renderMap({});
 }, 100); };

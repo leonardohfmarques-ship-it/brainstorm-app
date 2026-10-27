@@ -19,6 +19,13 @@
 <div class="app" id="app">
   <header class="top">
     <svg class="mark" viewBox="0 0 26 26" aria-hidden="true"><path d="M2 20h7l8-14h7" fill="none" stroke="#111" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="13" cy="13" r="5.5" fill="#fff" stroke="#111" stroke-width="3"/></svg>
+    <nav class="etapas" id="etapas" aria-label="Etapas">
+      <button class="et" data-etapa="brainstorm" title="Brainstorm (1)"><span class="et-d" aria-hidden="true"></span><span class="et-n">Brainstorm</span><span class="et-c" id="etC-brainstorm"></span></button>
+      <span class="et-l" aria-hidden="true"></span>
+      <button class="et" data-etapa="edicao" title="Edição (2)"><span class="et-d" aria-hidden="true"></span><span class="et-n">Edição</span><span class="et-c" id="etC-edicao"></span></button>
+      <span class="et-l" aria-hidden="true"></span>
+      <button class="et" data-etapa="kanban" title="Kanban (3)"><span class="et-d" aria-hidden="true"></span><span class="et-n">Kanban</span><span class="et-c" id="etC-kanban"></span></button>
+    </nav>
     <nav class="crumbs" aria-label="Caminho"><ol id="crumbs"></ol></nav>
     <div class="top-r">
       <span class="tag-local" id="tagLocal" hidden title="Modo local: as mudanças ficam só neste navegador">local</span>
@@ -52,6 +59,7 @@
       </div>
       <div class="estado" id="estado" hidden><div class="estado-in" id="estadoIn"></div></div>
     </section>
+    <section class="etapa" id="etapa" hidden></section>
   </main>
 </div>
 <div class="scrim" id="scrim" hidden></div>

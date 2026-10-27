@@ -97,6 +97,8 @@ export function titulos(body) {
   });
   return out;
 }
+// ordem das seções de cima (## ...) num arquivo de ideia
+const ORDEM = ['bruto', 'lapidado', 'edicao', 'plano'];
 const norm = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 
 // path = ['Bruto', 'Anotações'] → { h, level, start, end } (linhas do corpo, end exclusivo)
@@ -141,8 +143,12 @@ export function gravarSecao(doc, path, content) {
   const level = mae ? mae.level + 1 : 2;
   let at;
   if (mae) at = mae.end;
-  else if (norm(path[0]) === 'bruto') { const lap = acharSecao(doc, ['Lapidado']); at = lap ? lap.h : doc.body.length; }
-  else at = doc.body.length;
+  else {
+    // seções de cima na ordem do arquivo: entra antes da primeira que vem depois dela
+    const k = ORDEM.indexOf(norm(path[0]));
+    const depois = k >= 0 ? ORDEM.slice(k + 1).map(n => acharSecao(doc, [n])).find(Boolean) : null;
+    at = depois ? depois.h : doc.body.length;
+  }
   // ao final do arquivo, entra antes da última linha vazia (o \n final)
   let eof = false;
   if (at >= doc.body.length) { eof = true; at = doc.body.length; if (at > 0 && doc.body[at - 1] === '') at--; }
