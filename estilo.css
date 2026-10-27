@@ -309,6 +309,14 @@ textarea.notas:focus-visible{box-shadow:0 0 0 3px var(--lap)}
 .msg-erro{margin:14px 0 0;padding:10px 12px;border:2px solid var(--yt);border-radius:8px;color:var(--ink);font:500 14px/1.4 var(--sans);background:var(--paper)}
 .msg-erro b{color:var(--yt)}
 .nota-seg{margin:18px 0 0;font:400 12px/1.5 var(--mono);color:var(--gray);max-width:60ch}
+/* entrada com GitHub: um botão grande; a chave colada fica atrás de "Usar uma chave" */
+.entrada-gh{border-top:2px solid var(--ink);padding:26px 0 0}
+.entrada .btn-gh{display:flex;justify-content:center;gap:12px;width:100%;height:60px;border-radius:8px;font:800 19px/1 var(--sans);letter-spacing:.01em;text-decoration:none}
+.btn-gh .gh{width:22px;height:22px;flex:none;fill:currentColor}
+.btn-gh[aria-busy="true"]{opacity:.6;cursor:progress;pointer-events:none}
+.entrada-gh .nota-seg{margin-top:14px}
+.entrada .entrada-alt{margin:14px 0 0;padding:6px 0}
+.entrada-gh:not([hidden]) + .entrada-chave{margin-top:26px}
 
 /* carregando / erro dentro do mapa */
 .estado{position:absolute;inset:0;z-index:9;display:grid;place-items:center;padding:24px;background:color-mix(in srgb,var(--bg) 70%,transparent)}

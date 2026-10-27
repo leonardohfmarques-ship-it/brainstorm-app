@@ -14,6 +14,21 @@ O formato dos arquivos é o de `docs/FORMATO.md` daquele repositório; o vocabul
 
 Repositório, ramo e atalhos de produção ficam em `config.js`.
 
+### Entrar com GitHub (opcional)
+
+Com `login.worker` preenchido em `config.js`, a tela de entrada mostra o botão **Entrar com GitHub** (a chave colada
+continua em "Usar uma chave"). Peças:
+
+- **GitHub App** instalado só no repositório `brainstorm`, permissão Contents: Read and write, tokens que vencem
+  (8 h + refresh token).
+- **Worker** da Cloudflare (`worker/`): `/entrar` manda ao GitHub, `/callback` troca o code por token com o client
+  secret (que só existe no Worker) e devolve ao app no fragmento `#bs_token=...`, `/renovar` troca o refresh token.
+  Só devolve para `APP_URL` e `DEV_URL` (`worker/wrangler.toml`).
+- **App** (`js/sessao.js`): lê o fragmento, guarda `bs-token`, `bs-refresh`, `bs-vence`, `bs-refresh-vence`, limpa a
+  URL, renova 5 min antes de vencer e numa resposta 401. “Sair” apaga tudo.
+
+Publicar o Worker: `cd worker && npx wrangler deploy`; segredo: `npx wrangler secret put GITHUB_CLIENT_SECRET`.
+
 ## Rodar no Mac (desenvolvimento)
 
     python3 dev-server.py            # http://127.0.0.1:8773/?local=1
@@ -28,6 +43,7 @@ navegador. “Descartar edições locais” (menu Atalhos) volta aos arquivos.
 Ida e volta do formato (inclusive com os arquivos reais de `~/Desktop/BRAINSTORM/ideias`) e o backend do GitHub
 contra uma API de mentira (sem token real): carregar, gravar, juntar mudanças, conflito, criar, sem conexão.
 Seções Edição/Plano, estados, ordem das tarefas e apagar direção (GitHub de mentira e modo local).
+Entrada com GitHub (fragmento, renovação, 401 → renova → repete, Worker vazio) e as rotas do Worker.
 
 ## Como grava
 
@@ -52,6 +68,8 @@ Seções Edição/Plano, estados, ordem das tarefas e apagar direção (GitHub d
     js/modelo.js     arquivos → árvore de ideias e direções
     js/sync.js       fila de gravação, conflitos, indicador salvo/salvando
     js/github.js     backend de produção (API do GitHub)
+    js/sessao.js     entrada com GitHub: token + refresh token, renovação
+    worker/          Worker da Cloudflare do "Entrar com GitHub" (wrangler.toml, src/index.js)
     js/local.js      backend de desenvolvimento (?local=1)
     js/markdown.js   marked + DOMPurify, links e imagens de anexo
     dev-server.py    servidor local

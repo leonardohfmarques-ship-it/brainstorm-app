@@ -41,25 +41,26 @@ async function emParalelo(itens, limite, fn) {
 }
 
 export class GitHubBackend {
-  constructor({ owner, repo, branch = 'main', token, fetch: f } = {}) {
+  // token: chave colada (fixa). sessao: entrada com GitHub (renova sozinha; ver sessao.js)
+  constructor({ owner, repo, branch = 'main', token, sessao, fetch: f } = {}) {
     this.kind = 'github';
     this.owner = owner; this.repo = repo; this.branch = branch;
     this.token = token;
+    this.sessao = sessao || null;
     this._fetch = f || ((...a) => globalThis.fetch(...a));
     this.indice = new Map(); // path -> { sha, size }
     this.urls = new Map();   // sha -> object URL
     this.rev = null;
   }
 
-  async api(path, opts = {}) {
-    let res;
+  async pedir(path, opts, token) {
     try {
-      res = await this._fetch(API + path, {
+      return await this._fetch(API + path, {
         method: opts.method || 'GET',
         cache: 'no-store',
         headers: Object.assign({
           'Accept': 'application/vnd.github+json',
-          'Authorization': 'Bearer ' + this.token,
+          'Authorization': 'Bearer ' + token,
           'X-GitHub-Api-Version': '2022-11-28'
         }, opts.body ? { 'Content-Type': 'application/json' } : {}),
         body: opts.body ? JSON.stringify(opts.body) : undefined
@@ -67,6 +68,14 @@ export class GitHubBackend {
     } catch (e) {
       throw new ErroAPI('rede', 'Sem conexão com o GitHub.');
     }
+  }
+
+  async api(path, opts = {}) {
+    const ses = this.sessao;
+    const token = ses ? await ses.tokenValido() : this.token;
+    let res = await this.pedir(path, opts, token);
+    // entrada com GitHub: 401 = token vencido ou girado → renova uma vez e repete o pedido
+    if (res.status === 401 && ses && ses.podeRenovar()) res = await this.pedir(path, opts, await ses.renovar(token));
     if (res.ok) return res.status === 204 ? null : res.json();
     let msg = '';
     try { msg = (await res.json()).message || ''; } catch (e) { /* corpo vazio */ }

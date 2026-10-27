@@ -1,6 +1,7 @@
 // BRAINSTORM · app (direção "Diagrama"). Interface portada do protótipo aprovado; dados vêm dos arquivos.
 import CONFIG from '../config.js';
 import { GitHubBackend } from './github.js';
+import { Sessao, escolherInicio, consumirFragmento, enderecoWorker, linkEntrar, esquecer } from './sessao.js';
 import { LocalBackend } from './local.js';
 import { Store } from './sync.js';
 import { AREAS, AREA, temPedido } from './modelo.js';
@@ -39,12 +40,16 @@ const ls = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* sem armazenamento */ } },
   del(k) { try { localStorage.removeItem(k); } catch (e) { /* nada */ } }
 };
-const tokenGet = () => { try { return localStorage.getItem('bs-token') || ''; } catch (e) { return ''; } };
-const tokenSet = t => { try { localStorage.setItem('bs-token', t); } catch (e) { /* sem armazenamento: vale só nesta aba */ } };
-const tokenDel = () => { try { localStorage.removeItem('bs-token'); } catch (e) { /* nada */ } };
+// acesso ao GitHub: chave colada (bs-token) ou entrada com GitHub (bs-token + bs-refresh + validades; ver sessao.js)
+const ST = (() => { try { return window.localStorage; } catch (e) { const m = new Map(); return { getItem: k => m.has(k) ? m.get(k) : null, setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k) }; } })();
+const tokenSet = t => { try { ST.setItem('bs-token', t); } catch (e) { /* sem armazenamento: vale só nesta aba */ } };
+const tokenDel = () => esquecer(ST); // "Sair" apaga tudo: chave, token, refresh token e validades
+const WORKER = enderecoWorker(CONFIG); // vazio = só a chave colada (como antes)
 
 const params = new URLSearchParams(location.search);
 const LOCAL = params.has('local');
+// volta do GitHub: o token chega no fragmento (#), é guardado e a URL fica limpa
+const VOLTA = !LOCAL && WORKER ? consumirFragmento({ location, history, storage: ST }) : null;
 
 let backend = null, store = null;
 const UI = Object.assign({ path: [], sel: null, etapa: 'brainstorm', ed: null, kb: null }, ls.get('bs-ui', {}));
@@ -1126,6 +1131,7 @@ $('#btnSair').addEventListener('click', () => {
   if (store && store.ocupado && !confirm('Ainda há mudanças salvando. Sair mesmo assim?')) return;
   tokenDel(); ls.del('bs-cache'); location.reload();
 });
+const comSessao = () => !!(backend && backend.sessao);
 
 /* ---------------- topo, interface do mapa ---------------- */
 function renderCrumbs(liveName) {
@@ -1198,7 +1204,7 @@ function renderStatus(s) {
 }
 syncBtn.addEventListener('click', async () => {
   if (!store) return;
-  if (store.status === 'erro' && store.erro && store.erro.tipo === 'auth') { pedirChave('A chave guardada foi recusada pelo GitHub. Cola uma chave nova.'); return; }
+  if (store.status === 'erro' && store.erro && store.erro.tipo === 'auth') { pedirChave(comSessao() ? MSG_VENCEU : 'A chave guardada foi recusada pelo GitHub. Cola uma chave nova.'); return; }
   if (store.status === 'erro' || store.status === 'offline') { store.agora(); return; }
   if (store.ocupado) return;
   await buscarRemoto(true);
@@ -1213,7 +1219,10 @@ async function buscarRemoto(manual) {
     const mudou = await store.atualizar();
     if (mudou) { remarcarProvisorios(); const sc = $('#pbody') ? $('#pbody').scrollTop : 0; renderAll({ keep: true }); if ($('#pbody')) $('#pbody').scrollTop = sc; if (manual) toast('Atualizado com as mudanças do Claude.'); }
     else if (manual) toast('Nada novo no GitHub.');
-  } catch (e) { if (manual) toast(e.message || 'Não deu para buscar agora.'); }
+  } catch (e) {
+    if (e.tipo === 'auth' && comSessao()) { pedirChave(MSG_VENCEU); return; }
+    if (manual) toast(e.message || 'Não deu para buscar agora.');
+  }
   renderStatus();
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && Date.now() - ultimaBusca > 30000) buscarRemoto(false); });
@@ -1291,10 +1300,33 @@ function estado(tipo, titulo, texto, botao) {
   inn.innerHTML = `<div class="rail" style="--c:var(--ink)"><div class="runner"></div></div><h2>${esc(titulo)}</h2><p>${esc(texto)}</p>${botao ? `<button class="btn btn--solid" id="estadoBtn">${esc(botao.t)}</button>` : ''}`;
   if (botao) $('#estadoBtn').addEventListener('click', botao.fn);
 }
+const MSG_VENCEU = 'A entrada no GitHub venceu. Clica em “Entrar com GitHub” de novo.';
+// tela de entrada: com Worker, botão "Entrar com GitHub" e a chave atrás de "Usar uma chave"; sem Worker, só a chave
 function pedirChave(msg) {
   const ent = $('#entrada'); ent.hidden = false;
-  $('#entradaErro').innerHTML = msg ? `<p class="msg-erro">${esc(msg)}</p>` : '';
-  setTimeout(() => $('#token').focus(), 30);
+  const gh = !!WORKER;
+  $('#entradaGH').hidden = !gh;
+  $('#entradaChave').hidden = gh;
+  $('#btnUsarChave').hidden = false; $('#btnUsarChave').setAttribute('aria-expanded', 'false');
+  if (gh) {
+    $('#entradaSub').textContent = 'Entrar com GitHub · um clique por navegador';
+    $('#btnGitHub').href = linkEntrar(WORKER, location);
+    $('#btnGitHub').removeAttribute('aria-busy'); $('#btnGitHubT').textContent = 'Entrar com GitHub';
+  }
+  const alvo = gh ? $('#entradaAviso') : $('#entradaErro');
+  $('#entradaErro').innerHTML = ''; $('#entradaAviso').innerHTML = '';
+  alvo.innerHTML = msg ? `<p class="msg-erro">${esc(msg)}</p>` : '';
+  setTimeout(() => (gh ? $('#btnGitHub') : $('#token')).focus(), 30);
+}
+$('#btnGitHub').addEventListener('click', () => { $('#btnGitHub').setAttribute('aria-busy', 'true'); $('#btnGitHubT').textContent = 'Abrindo o GitHub…'; });
+window.addEventListener('pageshow', e => { if (e.persisted) { $('#btnGitHub').removeAttribute('aria-busy'); $('#btnGitHubT').textContent = 'Entrar com GitHub'; } });
+$('#btnUsarChave').addEventListener('click', () => {
+  $('#entradaChave').hidden = false; $('#btnUsarChave').hidden = true; $('#btnUsarChave').setAttribute('aria-expanded', 'true');
+  $('#token').focus();
+});
+function erroDaVolta(erro) {
+  if (erro === 'access_denied') return 'Entrada cancelada no GitHub. Clica de novo quando quiseres entrar.';
+  return `O GitHub não deixou entrar (${erro}). Tenta de novo.`;
 }
 $('#formEntrada').addEventListener('submit', async e => {
   e.preventDefault();
@@ -1305,7 +1337,7 @@ $('#formEntrada').addEventListener('submit', async e => {
   const b = new GitHubBackend({ owner: CONFIG.owner, repo: CONFIG.repo, branch: CONFIG.branch, token: t });
   try {
     await b.testar();
-    tokenSet(t); $('#token').value = '';
+    tokenDel(); tokenSet(t); $('#token').value = ''; // chave colada substitui uma entrada com GitHub antiga
     $('#entrada').hidden = true;
     iniciar(b);
   } catch (ex) {
@@ -1318,20 +1350,25 @@ async function iniciar(b) {
   store = new Store(backend);
   store.on((tipo, path) => {
     if (tipo === 'status') renderStatus();
+    // entrada com GitHub: renovação recusada ao salvar → volta para a tela de entrada
+    if (tipo === 'status' && comSessao() && store.status === 'erro' && store.erro && store.erro.tipo === 'auth') pedirChave(MSG_VENCEU);
     if (tipo === 'remoto-arquivo') { remarcarProvisorios(); if (!editando()) { const sc = $('#pbody') ? $('#pbody').scrollTop : 0; renderAll({ keep: true }); if ($('#pbody')) $('#pbody').scrollTop = sc; } }
   });
   // a cada reconstrução (mudança local), as direções sem arquivo continuam marcadas
   const rec = store.reconstruir.bind(store);
   store.reconstruir = () => { rec(); remarcarProvisorios(); };
   $('#tagLocal').hidden = !LOCAL;
-  $('#btnSair').textContent = LOCAL ? 'Descartar edições locais' : 'Sair (esquecer a chave neste navegador)';
+  $('#btnSair').textContent = LOCAL ? 'Descartar edições locais' : comSessao() ? 'Sair (desconectar o GitHub neste navegador)' : 'Sair (esquecer a chave neste navegador)';
   renderStatus('salvo');
   estado('carregando', 'Carregando as ideias', LOCAL ? 'Lendo os arquivos da pasta BRAINSTORM.' : 'Lendo o repositório brainstorm no GitHub.');
   try {
     await store.carregar();
   } catch (e) {
-    if (e.tipo === 'auth') { tokenDel(); estado(null); store = null; pedirChave('A chave guardada não vale mais (vencida ou apagada). Cria outra e cola aqui.'); return; }
-    if (e.tipo === 'naoexiste') { estado('erro', 'Repositório não encontrado', `A chave não enxerga ${CONFIG.owner}/${CONFIG.repo} (ramo ${CONFIG.branch}). Confere o acesso da chave.`, { t: 'Trocar a chave', fn: () => { tokenDel(); location.reload(); } }); return; }
+    if (e.tipo === 'auth') { const ses = comSessao(); tokenDel(); estado(null); store = null; pedirChave(ses ? MSG_VENCEU : 'A chave guardada não vale mais (vencida ou apagada). Cria outra e cola aqui.'); return; }
+    if (e.tipo === 'naoexiste') {
+      if (comSessao()) { estado('erro', 'Repositório não encontrado', `O app BRAINSTORM do GitHub não enxerga ${CONFIG.owner}/${CONFIG.repo}. Confere se ele está instalado nesse repositório.`, { t: 'Sair e entrar de novo', fn: () => { tokenDel(); location.reload(); } }); return; }
+      estado('erro', 'Repositório não encontrado', `A chave não enxerga ${CONFIG.owner}/${CONFIG.repo} (ramo ${CONFIG.branch}). Confere o acesso da chave.`, { t: 'Trocar a chave', fn: () => { tokenDel(); location.reload(); } }); return;
+    }
     estado('erro', e.tipo === 'rede' ? 'Sem conexão' : 'Não deu para carregar', e.message || 'Erro desconhecido.', { t: 'Tentar de novo', fn: () => iniciar(backend) });
     return;
   }
@@ -1345,9 +1382,9 @@ async function iniciar(b) {
 }
 
 /* ---------------- início ---------------- */
-if (LOCAL) iniciar(new LocalBackend({ base: params.get('dados') || './dados/' }));
-else {
-  const t = tokenGet();
-  if (t) iniciar(new GitHubBackend({ owner: CONFIG.owner, repo: CONFIG.repo, branch: CONFIG.branch, token: t }));
-  else pedirChave('');
-}
+const INI = escolherInicio({ local: LOCAL, config: CONFIG, storage: ST });
+const GH = { owner: CONFIG.owner, repo: CONFIG.repo, branch: CONFIG.branch };
+if (INI.tipo === 'local') iniciar(new LocalBackend({ base: params.get('dados') || './dados/' }));
+else if (INI.tipo === 'sessao') iniciar(new GitHubBackend({ ...GH, sessao: new Sessao({ worker: INI.worker, storage: ST }) }));
+else if (INI.tipo === 'chave') iniciar(new GitHubBackend({ ...GH, token: INI.token }));
+else pedirChave(VOLTA && VOLTA.erro ? erroDaVolta(VOLTA.erro) : '');

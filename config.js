@@ -3,6 +3,9 @@ export default {
   owner: 'leonardohfmarques-ship-it',
   repo: 'brainstorm',
   branch: 'main',
+  // "Entrar com GitHub": endereço do Worker (pasta worker/), ex. 'https://brainstorm-entrar.<conta>.workers.dev'.
+  // Vazio = o botão não aparece e o app pede a chave colada, como antes.
+  login: { worker: '' },
   // atalhos para a produção (fora do BRAINSTORM): o app copia o caminho
   atalhos: [
     { nome: 'Roteiros de Reels', onde: '~/Desktop/instagram/roteiros' },

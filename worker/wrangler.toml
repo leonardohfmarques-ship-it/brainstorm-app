@@ -1,0 +1,14 @@
+# Worker "Entrar com GitHub" do app BRAINSTORM.
+# Troca o code do GitHub App por token (precisa do client secret, que só existe aqui) e renova o token.
+# O segredo NÃO fica neste arquivo: npx wrangler secret put GITHUB_CLIENT_SECRET
+name = "brainstorm-entrar"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+[vars]
+# Client ID do GitHub App (não é segredo). O Claude troca quando o Leonardo passar.
+GITHUB_CLIENT_ID = "COLOCAR_O_CLIENT_ID"
+# Para onde o Worker devolve depois de entrar (e quem pode chamar /renovar)
+APP_URL = "https://leonardohfmarques-ship-it.github.io/brainstorm-app/"
+# App rodando no Mac (dev-server.py). Vazio = desligado.
+DEV_URL = "http://localhost:8773/"
