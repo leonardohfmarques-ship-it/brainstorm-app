@@ -8,6 +8,7 @@ import { slug as fazerSlug, novaDirecao } from './formato.js';
 import { md, hidratar } from './markdown.js';
 import { criarEtapas, nomeEtapa } from './etapas.js';
 import { total as totalTarefas } from './plano.js';
+import { relDe, ideiaDe, noPorRel, maeRel, topoRel, ancestraisRel, indicesRel, abertosPadrao, todosComGalhos, fecharRel, visiveisRel, desenharArvore, migrarUI, largNome } from './arvore.js';
 
 const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 const RM = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -66,6 +67,22 @@ function resolve(path) {
   }
   return { idea, node, chain, idx };
 }
+/* ---------------- galhos abertos (por ideia, só neste navegador) ----------------
+   bs-abertos = { ideia: [rel, ...] }. Sem entrada: as direções do primeiro anel com galhos ficam abertas. */
+function abertosDe(idea) {
+  const v = ls.get('bs-abertos', {})[idea.key];
+  return new Set(Array.isArray(v) ? v : abertosPadrao(idea));
+}
+function gravarAbertos(idea, set) { const all = ls.get('bs-abertos', {}); all[idea.key] = [...set]; ls.set('bs-abertos', all); }
+// garante que a direção aparece no mapa (abre as mães). Devolve true se abriu alguma coisa.
+function abrirAte(idea, rel, tambem) {
+  if (!idea || !rel) return false;
+  const set = abertosDe(idea); let mudou = false;
+  ancestraisRel(rel).concat(tambem ? [rel] : []).forEach(r => { if (!set.has(r)) { set.add(r); mudou = true; } });
+  if (mudou) gravarAbertos(idea, set);
+  return mudou;
+}
+const ideiaAberta = () => { const R = resolve(UI.path); return R ? R.idea : null; };
 function seg(depth, i) {
   if (depth === 1) return String.fromCharCode(65 + (i % 26));
   if (depth % 2 === 0) return String(i + 1);
@@ -126,6 +143,19 @@ function labelSide(x, y, cx, cy, W, prefer, min = 150) {
   const mw = side === 'r' ? Math.min(230, roomR) : side === 'l' ? Math.min(230, roomL) : 170;
   return { side, mw };
 }
+// nomes das direções sempre para fora do centro da ideia; quem está com os galhos abertos põe o nome
+// em cima ou embaixo, para não cobrir os filhos
+function ladosDosNomes(nodes, byId) {
+  const c = byId.c; if (!c) return;
+  nodes.forEach(nd => {
+    if (nd.kind !== 'dir') return;
+    const a = Math.atan2(nd.y - c.y, nd.x - c.x), co = Math.cos(a), si = Math.sin(a);
+    nd.ang = a;
+    if (nd.aberta) { nd.side = si < -0.2 ? 't' : 'b'; nd.mw = nd.depth === 1 ? 170 : 150; }
+    else if (nd.depth === 1) { nd.side = co > 0.3 ? 'r' : co < -0.3 ? 'l' : (si < 0 ? 't' : 'b'); nd.mw = nd.side === 't' || nd.side === 'b' ? 170 : 230; }
+    else { nd.side = co >= 0 ? 'r' : 'l'; nd.mw = 150; }
+  });
+}
 function buildGraph(W, H) {
   const nodes = [], edges = [];
   const add = n => { nodes.push(n); return n; };
@@ -164,63 +194,51 @@ function buildGraph(W, H) {
       }
     });
   } else {
-    const R = resolve(UI.path); const { idea, node: center, idx } = R;
+    // a ideia inteira num mapa só: o primeiro anel fixo e os galhos abertos crescendo para fora
+    const idea = resolve(UI.path).idea;
     const col = AREA[idea.area].c;
-    const cx = W * 0.5, cy = H * 0.44;
-    const isIdea = UI.path.length === 1;
-    const csuf = suffix(idx);
-    add({ id: 'c', kind: 'center', ref: center, x: cx, y: cy, color: col, r: 27, side: 'b', mw: 300, depth: 0, pedido: !!center.pedido,
-      title: center.titulo, meta: isIdea ? [ideaCode(idea), areaNome(idea.area)].filter(Boolean).join(' · ') : `${codigoDir(idea, csuf)} · direção`,
-      code: isIdea ? AREA[idea.area].b : csuf });
-    const kids = center.direcoes;
-    const n = kids.length; step = 360 / Math.max(n, 1);
-    const pi = kids.findIndex(d => d.direcoes.length);
-    start = pi >= 0 ? -pi * step : (n === 1 ? 0 : (n % 2 ? -90 : -90 + step / 2));
-    const rx = W * 0.33, ry = H * 0.34;
-    kids.forEach((d, i) => {
-      const th = (start + i * step) * Math.PI / 180;
-      const hasKids = d.direcoes.length > 0;
-      const k = hasKids ? 0.72 : 1;
-      let x = cx + rx * k * Math.cos(th), y = cy + ry * k * Math.sin(th);
-      const c = Math.cos(th), s = Math.sin(th);
-      const prefer = c > 0.3 ? 'r' : c < -0.3 ? 'l' : (s < 0 ? 't' : 'b');
-      let ls_ = labelSide(x, y, cx, cy, W, prefer);
-      if (hasKids) ls_ = { side: s < -0.3 ? 't' : 'b', mw: 170 };
-      x = Math.max(ls_.side === 'b' || ls_.side === 't' ? 90 : 30, Math.min(W - (ls_.side === 'b' || ls_.side === 't' ? 90 : 30), x));
-      // direção com galhos: deixa espaço para os nomes dos galhos caberem na tela
-      if (hasKids) { const SUB = 96 + 150; x = c >= 0 ? Math.max(cx + 60, Math.min(x, W - SUB)) : Math.min(cx - 60, Math.max(x, SUB)); }
-      const code = csuf + seg(idx.length + 1, i);
-      const meta = [code, hasKids ? `${d.direcoes.length} dentro` : '', !d.lapidado ? 'nova' : '', d.pedido ? 'pedido ao Claude' : ''].filter(Boolean).join(' · ');
-      const id = 'd:' + d.slug;
-      add({ id, kind: 'dir', ref: d, slug: d.slug, hasKids, x, y, parent: 'c', color: col, r: 11, side: ls_.side, mw: ls_.mw, depth: 1, title: d.titulo, meta, code, pedido: !!d.pedido, novo: !!d.provisorio, th });
-      edges.push({ from: 'c', to: id, color: col, w: 7, bias: 0, depth: 1 });
-      if (hasKids) {
-        const out = c >= 0 ? 1 : -1, m = d.direcoes.length;
-        d.direcoes.forEach((sd, j) => {
-          const sxp = x + out * 96, syp = Math.max(24, Math.min(H - 24, y + (j - (m - 1) / 2) * 40));
-          const sid = id + '>' + sd.slug;
-          add({ id: sid, kind: 'sub', ref: sd, owner: d, x: sxp, y: syp, parent: id, color: col, r: 6, side: out > 0 ? 'r' : 'l', mw: 190, depth: 2,
-            title: sd.titulo, code: code + seg(idx.length + 2, j), pedido: !!sd.pedido });
-          edges.push({ from: id, to: sid, color: col, w: 4, bias: 0, depth: 2 });
-        });
-      } else if (d.pedido) {
-        add({ id: 'o:' + d.slug, kind: 'obras', parent: id, color: col, r: 6, x, y, depth: 2, obras: true });
-        edges.push({ from: id, to: 'o:' + d.slug, color: col, w: 5, bias: 0, depth: 2, obras: true });
-      }
-    });
-    if (!n) {
+    const cx = W * 0.5, cy = H * 0.46;
+    add({ id: 'c', kind: 'center', ref: idea, x: cx, y: cy, color: col, r: 27, side: 'b', mw: 300, depth: 0, pedido: !!idea.pedido,
+      title: idea.titulo, meta: [ideaCode(idea), areaNome(idea.area)].filter(Boolean).join(' · '), code: AREA[idea.area].b });
+    const ab = abertosDe(idea);
+    const R1 = Math.max(180, Math.min(250, Math.min(W, H) * 0.3));
+    const lay = desenharArvore(idea, ab, { R1, passo: 185 });
+    start = lay.inicio; step = lay.passo;
+    const walk = (mae, maeId, mrel, ix, depth) => {
+      mae.direcoes.forEach((d, i) => {
+        const rel = mrel ? mrel + '/' + d.slug : d.slug, p = lay.pos.get(rel); if (!p) return;
+        const code = suffix([...ix, i]), id = 'd:' + rel;
+        const hasKids = d.direcoes.length > 0, aberta = hasKids && ab.has(rel);
+        const meta = depth === 1
+          ? [code, hasKids ? `${d.direcoes.length} dentro` : '', !d.lapidado ? 'nova' : '', d.pedido ? 'pedido ao Claude' : ''].filter(Boolean).join(' · ')
+          : [hasKids ? `${d.direcoes.length} dentro` : '', d.pedido ? 'pedido ao Claude' : ''].filter(Boolean).join(' · ');
+        add({ id, kind: 'dir', ref: d, rel, slug: d.slug, depth, hasKids, aberta, x: cx + p.x, y: cy + p.y, parent: maeId, color: col,
+          r: depth === 1 ? 11 : depth === 2 ? 7 : 6, side: 'r', mw: depth === 1 ? 230 : 150, title: d.titulo, meta, code,
+          pedido: !!d.pedido || (!aberta && hasKids && temPedido(d)), novo: !!d.provisorio });
+        edges.push({ from: maeId, to: id, color: col, w: depth === 1 ? 7 : depth === 2 ? 4 : 3, bias: 0, depth: Math.min(depth, 3) });
+        if (aberta) walk(d, id, rel, [...ix, i], depth + 1);
+        else if (d.pedido && !hasKids) {
+          add({ id: 'o:' + rel, kind: 'obras', parent: id, color: col, r: 6, x: cx + p.x, y: cy + p.y, depth: Math.min(depth + 1, 3), obras: true });
+          edges.push({ from: id, to: 'o:' + rel, color: col, w: 5, bias: 0, depth: Math.min(depth + 1, 3), obras: true });
+        }
+      });
+    };
+    walk(idea, 'c', '', [], 1);
+    if (!idea.direcoes.length) {
       const gx = cx + W * 0.26, gy = cy - H * 0.2;
       add({ id: 'g:vazio', kind: 'ghost', vazio: true, x: gx, y: gy, parent: 'c', color: col, r: 10, side: 'r', mw: Math.min(220, W - gx - 40), depth: 1,
-        title: center.pedido ? 'As direções do Claude saem daqui' : 'Ainda sem direções', meta: center.pedido ? 'linha em obras' : 'N cria uma · Desenvolver pede ao Claude' });
-      edges.push({ from: 'c', to: 'g:vazio', color: col, w: 6, bias: .3, depth: 1, dash: true, obras: !!center.pedido });
+        title: idea.pedido ? 'As direções do Claude saem daqui' : 'Ainda sem direções', meta: idea.pedido ? 'linha em obras' : 'N cria uma · Desenvolver pede ao Claude' });
+      edges.push({ from: 'c', to: 'g:vazio', color: col, w: 6, bias: .3, depth: 1, dash: true, obras: !!idea.pedido });
     }
   }
   const byId = {}; nodes.forEach(nd => byId[nd.id] = nd);
-  // posições guardadas: relativas à mãe, aplicadas de cima para baixo
+  // posições guardadas: relativas à mãe, aplicadas de cima para baixo. Na ideia: o primeiro anel usa o pos do
+  // arquivo; os galhos mais fundos, só o arrasto feito neste navegador (bs-galhopos). O pos de direções fundas
+  // gravado no tempo de "uma página por direção" era relativo a outro desenho e fica de fora.
   const sx = W / REF_W, sy = H / REF_H;
-  const vk = viewKey();
+  const vk = viewKey(), naIdeia = UI.path.length > 0;
   const pan = (ls.get('bs-pan', {})[vk]) || null;
-  const subPos = (ls.get('bs-subpos', {})[vk]) || {};
+  const galhoPos = naIdeia ? (ls.get('bs-galhopos', {})[UI.path[0]] || {}) : {};
   const areasPos = (store.mapa && store.mapa.areas) || {};
   const def = {}; nodes.forEach(nd => def[nd.id] = [nd.x, nd.y]);
   const ok2 = v => Array.isArray(v) && v.length === 2 && v.every(Number.isFinite);
@@ -229,32 +247,26 @@ function buildGraph(W, H) {
     const P = nd.parent && byId[nd.parent];
     if (!P) { if (ok2(pan)) { nd.x += pan[0] * sx; nd.y += pan[1] * sy; nd.moved = true; } return; }
     let saved = null;
-    if (nd.kind === 'area') saved = areasPos[nd.area];
-    else if (nd.kind === 'idea' || nd.kind === 'dir') saved = nd.ref.pos;
-    else if (nd.kind === 'sub') saved = subPos[nd.id];
+    if (nd.kind === 'area' ) saved = areasPos[nd.area];
+    else if (nd.kind === 'idea' || (nd.kind === 'dir' && nd.depth === 1)) saved = nd.ref.pos;
+    else if (nd.kind === 'dir') saved = galhoPos[nd.rel];
     saved = ok2(saved) ? saved : null;
     const off = saved ? [saved[0] * sx, saved[1] * sy] : [def[nd.id][0] - def[P.id][0], def[nd.id][1] - def[P.id][1]];
-    nd.x = Math.max(24, Math.min(W - 24, P.x + off[0]));
-    nd.y = Math.max(24, Math.min(H - 24, P.y + off[1]));
+    // no mapa geral tudo cabe na tela; na ideia a câmera enquadra
+    nd.x = naIdeia ? P.x + off[0] : Math.max(24, Math.min(W - 24, P.x + off[0]));
+    nd.y = naIdeia ? P.y + off[1] : Math.max(24, Math.min(H - 24, P.y + off[1]));
     nd.moved = !!saved || !!P.moved;
   });
+  if (naIdeia) ladosDosNomes(nodes, byId);
   nodes.forEach(nd => {
     if (nd.obras) {
       const p = byId[nd.parent], c = byId.c;
       const dir = p.side === 't' ? 1 : p.side === 'b' ? -1 : (p.y < c.y ? -1 : 1);
       const hx = p.x < c.x ? -1 : 1;
-      nd.x = Math.max(16, Math.min(W - 16, p.x + hx * 36)); nd.y = Math.max(16, Math.min(H - 16, p.y + dir * 58));
+      nd.x = p.x + hx * 36; nd.y = p.y + dir * 58;
     }
   });
-  // galhos sem posição guardada: se o nome não cabe de um lado da tela, vão para o outro
-  const NOME = 150, BR = 96;
-  nodes.forEach(nd => {
-    if (nd.kind !== 'sub' || ok2(subPos[nd.id])) return;
-    const p = byId[nd.parent];
-    if (nd.side === 'r' && p.x + BR + NOME > W && p.x - BR - NOME >= 0) { nd.x = p.x - BR; nd.side = 'l'; }
-    else if (nd.side === 'l' && p.x - BR - NOME < 0 && p.x + BR + NOME <= W) { nd.x = p.x + BR; nd.side = 'r'; }
-  });
-  nodes.forEach(nd => { if ((nd.kind === 'idea' || nd.kind === 'dir' || nd.kind === 'ghost') && !nd.hasKids) { nd.pref = nd.side; nd.mw0 = nd.mw; } });
+  nodes.forEach(nd => { if (!naIdeia && (nd.kind === 'idea' || nd.kind === 'ghost')) { nd.pref = nd.side; nd.mw0 = nd.mw; } });
   return { nodes, edges, byId, start, step };
 }
 
@@ -275,12 +287,59 @@ function zoomEm(px, py, fator) {
   CAM.x = px - (px - CAM.x) * (z / CAM.z); CAM.y = py - (py - CAM.y) * (z / CAM.z); CAM.z = z; applyCam();
 }
 function zoomCentro(fator) { const r = mapEl.getBoundingClientRect(); zoomEm(r.width / 2, r.height / 2, fator); }
-function camReset() { CAM.z = 1; CAM.x = 0; CAM.y = 0; applyCam(); }
+function camReset() { pararCam(); CAM.z = 1; CAM.x = 0; CAM.y = 0; applyCam(); }
+// câmera andando suave até um ponto (enquadrar a ideia, mostrar galhos que abriram fora da tela)
+let camRaf = 0;
+function pararCam() { if (camRaf) { cancelAnimationFrame(camRaf); camRaf = 0; } }
+function camPara(z, x, y, anim) {
+  pararCam();
+  if (!anim || RM.matches) { CAM.z = z; CAM.x = x; CAM.y = y; applyCam(); return; }
+  const de = { ...CAM }, t0 = performance.now();
+  const passo = t => {
+    const k = Math.min(1, (t - t0) / 340), e = 1 - Math.pow(1 - k, 3);
+    CAM.z = de.z + (z - de.z) * e; CAM.x = de.x + (x - de.x) * e; CAM.y = de.y + (y - de.y) * e; applyCam();
+    camRaf = k < 1 ? requestAnimationFrame(passo) : 0;
+  };
+  camRaf = requestAnimationFrame(passo);
+}
+// caixa que os nós ocupam (posição final, com o nome estimado pelo lado)
+function caixaNos(nodes) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  nodes.forEach(n => {
+    if (n.obras) return;
+    const r = n.r || 10, w = n.kind === 'center' ? 300 : Math.min(n.mw || 200, largNome(n.title) + (n.depth === 1 ? 50 : 0));
+    let a = n.x - r, b = n.x + r, c = n.y - r, d = n.y + r;
+    if (n.side === 'r') b += w + 12; else if (n.side === 'l') a -= w + 12;
+    else { a = Math.min(a, n.x - w / 2); b = Math.max(b, n.x + w / 2); if (n.side === 't') c -= 52; else d += 60; }
+    x0 = Math.min(x0, a); x1 = Math.max(x1, b); y0 = Math.min(y0, c); y1 = Math.max(y1, d);
+  });
+  return { x0, y0, x1, y1 };
+}
+// margens da tela livres dos botões do mapa
+const MARG = { l: 24, r: 24, t: 64, b: 76 };
+// enquadra a ideia inteira (nós = todos) ou só um pedaço (nós = lista): nunca aproxima além de 100%
+function enquadrar(nos, anim) {
+  if (!G.nodes.length) return;
+  const lista = nos || G.nodes, b = caixaNos(lista);
+  if (!Number.isFinite(b.x0)) return;
+  const vw = G.W - MARG.l - MARG.r, vh = G.H - MARG.t - MARG.b;
+  if (!nos) {
+    // cabe sem mexer? volta ao normal
+    if (b.x0 >= MARG.l && b.x1 <= G.W - MARG.r && b.y0 >= MARG.t && b.y1 <= G.H - MARG.b) { camPara(1, 0, 0, anim); return; }
+  } else {
+    // já está à vista com a câmera atual? não mexe
+    const sx0 = CAM.x + b.x0 * CAM.z, sx1 = CAM.x + b.x1 * CAM.z, sy0 = CAM.y + b.y0 * CAM.z, sy1 = CAM.y + b.y1 * CAM.z;
+    if (sx0 >= MARG.l && sx1 <= G.W - MARG.r && sy0 >= MARG.t && sy1 <= G.H - MARG.b) return;
+  }
+  const z = Math.max(ZMIN, Math.min(nos ? CAM.z : 1, vw / (b.x1 - b.x0), vh / (b.y1 - b.y0)));
+  const mx = (b.x0 + b.x1) / 2, my = (b.y0 + b.y1) / 2;
+  camPara(z, MARG.l + vw / 2 - mx * z, MARG.t + vh / 2 - my * z, anim);
+}
 const ptMapa = e => { const r = mapEl.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
 const foraDoMapa = t => t.closest('.st, .map-ui, .atalhos, .estado, .cartouche, button, input, textarea, a');
 mapEl.addEventListener('wheel', e => {
   if (!store || e.target.closest('.atalhos, .estado')) return;
-  e.preventDefault();
+  e.preventDefault(); pararCam();
   if (e.ctrlKey || e.metaKey) { const [px, py] = ptMapa(e); zoomEm(px, py, Math.exp(-e.deltaY * 0.01)); }
   else { CAM.x -= e.deltaX; CAM.y -= e.deltaY; applyCam(); }
 }, { passive: false });
@@ -292,7 +351,7 @@ mapEl.addEventListener('gesturechange', e => { e.preventDefault(); const [px, py
 const dedos = new Map(); let passeio = null;
 mapEl.addEventListener('pointerdown', e => {
   if (!store || drag || busy || foraDoMapa(e.target)) return;
-  dedos.set(e.pointerId, ptMapa(e));
+  pararCam(); dedos.set(e.pointerId, ptMapa(e));
   try { mapEl.setPointerCapture(e.pointerId); } catch (err) { /* sem captura */ }
   if (dedos.size === 1) { passeio = { x0: e.clientX, y0: e.clientY, cx: CAM.x, cy: CAM.y }; mapEl.classList.add('is-pan'); }
   else { passeio = null; const [a, b] = [...dedos.values()]; passeio = { pinca: Math.hypot(a[0] - b[0], a[1] - b[1]) }; }
@@ -323,24 +382,24 @@ function nodeHTML(n) {
   const style = `--r:${n.r || 0}px;--c:${n.color || '#111'};--mw:${Math.round(n.mw || 220)}px`;
   if (n.kind === 'root') return { cls: 'st st--root', style, html: '<span class="cap">BRAINSTORM</span>', label: 'BRAINSTORM, centro do mapa geral' };
   if (n.kind === 'obras') return { cls: 'st st--obras', style, html: '<span class="dot"></span>', label: '' };
-  const sel = (n.kind === 'dir' && UI.sel === n.slug) || (n.kind === 'center' && !UI.sel);
+  const sel = (n.kind === 'dir' && UI.sel === n.rel) || (n.kind === 'center' && !UI.sel);
   let inner = '';
   if (n.kind === 'center') {
     inner = `<span class="dot">${esc(n.code)}</span><span class="lbl b"><span class="ttl" data-ttl>${esc(n.title)}</span><span class="meta">${esc(n.meta)}</span></span>`;
-  } else if (n.kind === 'sub') {
-    inner = `<span class="dot"></span><span class="lbl ${n.side}"><span class="ttl" title="${esc(n.title)}">${esc(n.title)}</span></span>`;
   } else {
     const metaFirst = n.side.startsWith('t');
-    const meta = `<span class="meta">${esc(n.meta)}</span>`;
-    const open = n.hasKids ? `<span class="meta open">clique de novo para abrir</span>` : '';
-    inner = `<span class="dot"></span><span class="lbl ${n.side}">${metaFirst ? meta : ''}<span class="ttl" data-ttl>${esc(n.title)}</span>${metaFirst ? '' : meta}${open}</span>`;
+    const meta = n.meta ? `<span class="meta">${esc(n.meta)}</span>` : '';
+    // + / − : galho fechado ou aberto
+    const pm = n.kind === 'dir' && n.hasKids ? `<span class="pm pm--${n.side}" aria-hidden="true">${n.aberta ? '−' : '+'}</span>` : '';
+    inner = `<span class="dot"></span>${pm}<span class="lbl ${n.side}">${metaFirst ? meta : ''}<span class="ttl" data-ttl>${esc(n.title)}</span>${metaFirst ? '' : meta}</span>`;
   }
-  const label = n.kind === 'idea' ? `Abrir ideia: ${n.title}` : n.kind === 'area' ? `Área ${n.title}, ${n.meta}` : n.kind === 'dir' ? `Direção ${n.code}: ${n.title}` : n.kind === 'sub' ? `Direção ${n.code}: ${n.title}` : n.kind === 'ghost' ? `${n.title}. ${n.meta}` : n.title;
-  return { cls: `st st--${n.kind}${sel ? ' is-sel' : ''}${n.pedido ? ' is-pedido' : ''}${n.novo ? ' is-novo' : ''}`, style, html: inner, label };
+  const label = n.kind === 'idea' ? `Abrir ideia: ${n.title}` : n.kind === 'area' ? `Área ${n.title}, ${n.meta}` : n.kind === 'dir' ? `Direção: ${n.title}` : n.kind === 'ghost' ? `${n.title}. ${n.meta}` : n.title;
+  const fundo = n.kind === 'dir' && n.depth > 1 ? ' st--fundo' : '';
+  return { cls: `st st--${n.kind}${fundo}${sel ? ' is-sel' : ''}${n.pedido ? ' is-pedido' : ''}${n.novo ? ' is-novo' : ''}`, style, html: inner, label };
 }
 
 function renderMap(opts = {}) {
-  if (!store) return;
+  if (!store || store.rev == null) return; // ainda carregando: não descarta a ideia aberta
   if (UI.path.length && !resolve(UI.path)) { UI.path = []; UI.sel = null; saveUI(); }
   const rect = mapEl.getBoundingClientRect();
   const W = Math.max(320, rect.width), H = Math.max(320, rect.height);
@@ -369,7 +428,8 @@ function renderMap(opts = {}) {
     if (h.label) el.setAttribute('aria-label', h.label);
     if (n.kind === 'obras') { el.tabIndex = -1; el.setAttribute('aria-hidden', 'true'); }
     if (n.kind === 'ghost' && !n.vazio) el.setAttribute('aria-disabled', 'true');
-    if (n.kind === 'dir' || n.kind === 'center') el.setAttribute('aria-pressed', String((n.kind === 'dir' && UI.sel === n.slug) || (n.kind === 'center' && !UI.sel)));
+    if (n.kind === 'dir' || n.kind === 'center') el.setAttribute('aria-pressed', String((n.kind === 'dir' && UI.sel === n.rel) || (n.kind === 'center' && !UI.sel)));
+    if (n.kind === 'dir' && n.hasKids) el.setAttribute('aria-expanded', String(!!n.aberta));
     n.el = el; bindNode(n);
     world.appendChild(el);
   });
@@ -378,6 +438,7 @@ function renderMap(opts = {}) {
   applyDim();
   G.nodes.forEach(n => { if (n.moved) relabel(n); });
   G.nodes.forEach(place); updateEdges();
+  if (opts.enter && UI.path.length) enquadrar(null, false);
   if (opts.enter && !RM.matches) enterAnim();
   if (opts.keep) kick();
   if (focusedId && G.byId[focusedId]) G.byId[focusedId].el.focus({ preventScroll: true });
@@ -399,8 +460,8 @@ function enterAnim() {
     const a = e.el.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }], { duration: STEP, delay: (e.depth - 1) * STEP, easing: 'cubic-bezier(0,0,.2,1)', fill: 'forwards' });
     a.onfinish = () => { e.el.style.strokeDasharray = ''; e.el.style.strokeDashoffset = ''; a.cancel(); };
   });
-  G.nodes.forEach(n => { n.el.style.setProperty('--dl', (n.depth * STEP) + 'ms'); n.el.classList.add('pop'); });
-  setTimeout(() => G.nodes.forEach(n => n.el && n.el.classList.remove('pop')), 2 * STEP + 400);
+  G.nodes.forEach(n => { n.el.style.setProperty('--dl', (Math.min(n.depth || 0, 3) * STEP) + 'ms'); n.el.classList.add('pop'); });
+  setTimeout(() => G.nodes.forEach(n => n.el && n.el.classList.remove('pop')), 3 * STEP + 400);
 }
 function kick() { if (!raf) raf = requestAnimationFrame(tick); }
 function tick() {
@@ -441,10 +502,10 @@ function bindNode(n) {
   el.addEventListener('click', e => {
     if (el._dragged) { el._dragged = false; e.preventDefault(); return; }
     if (e.target.closest('.ren')) return;
-    onNodeClick(n);
+    onNodeClick(n, e);
   });
   if (n.kind === 'dir' || n.kind === 'center') {
-    el.addEventListener('dblclick', e => { e.preventDefault(); clearTimeout(clickT); startRename(n.kind === 'center' ? null : n.slug); });
+    el.addEventListener('dblclick', e => { e.preventDefault(); clearTimeout(clickT); startRename(n.kind === 'center' ? null : n.rel); });
   }
 }
 window.addEventListener('pointermove', e => {
@@ -465,7 +526,7 @@ window.addEventListener('pointermove', e => {
   const movable = G.nodes.filter(o => !(o === n || descSet.has(o.id) || drag.anc.includes(o.id) || o.kind === 'root' || o.kind === 'center'));
   movable.forEach(o => { const s = drag.snapshot[o.id]; o.x = s[0]; o.y = s[1]; });
   movable.forEach(o => {
-    if (o.obras || o.kind === 'sub') return;
+    if (o.obras || (o.kind === 'dir' && o.depth > 1)) return; // galhos fundos andam só com a mãe
     const s = drag.snapshot[o.id]; const vx = s[0] - n.x, vy = s[1] - n.y, d = Math.hypot(vx, vy) || 0.01;
     const MIN = 88;
     if (d < MIN) {
@@ -511,8 +572,8 @@ window.addEventListener('pointercancel', endDrag);
 function persistirArrasto(d) {
   const vk = viewKey();
   const areas = {}, fm = new Map(); // file -> { fm, titulo }
-  const subPosAll = ls.get('bs-subpos', {}); const subPos = subPosAll[vk] || {};
-  let subMudou = false;
+  const galhoAll = ls.get('bs-galhopos', {}); const galhoPos = (UI.path.length && galhoAll[UI.path[0]]) || {};
+  let galhoMudou = false;
   const quer = (node, campos) => { const f = node.file; const cur = fm.get(f) || { fm: {}, titulo: node.titulo }; Object.assign(cur.fm, campos); fm.set(f, cur); };
   G.nodes.forEach(o => {
     if (o.obras || o.kind === 'ghost') return;
@@ -527,12 +588,12 @@ function persistirArrasto(d) {
     if (Math.abs(r0[0] - r1[0]) < 0.5 && Math.abs(r0[1] - r1[1]) < 0.5) return;
     const u = paraU(r1[0], r1[1]);
     if (o.kind === 'area') areas[o.area] = u;
-    else if (o.kind === 'idea' || o.kind === 'dir') { if (!o.ref.provisorio) quer(o.ref, { pos: u }); }
-    else if (o.kind === 'sub') { subPos[o.id] = u; subMudou = true; }
+    else if (o.kind === 'idea' || (o.kind === 'dir' && o.depth === 1)) { if (!o.ref.provisorio) quer(o.ref, { pos: u }); }
+    else if (o.kind === 'dir') { galhoPos[o.rel] = u; galhoMudou = true; }
   });
   // ordem das direções segue a volta no mapa (a partir do ponto de partida do desenho)
   let reordenou = false;
-  const kidsN = G.nodes.filter(o => o.kind === 'dir');
+  const kidsN = G.nodes.filter(o => o.kind === 'dir' && o.depth === 1);
   const c = G.byId.c;
   if (c && kidsN.length > 1 && kidsN.some(o => d.n === o || Math.abs(o.x - d.snapshot[o.id][0]) > 0.5 || Math.abs(o.y - d.snapshot[o.id][1]) > 0.5)) {
     const ang = o => { const a = Math.atan2(o.y - c.y, o.x - c.x) * 180 / Math.PI; return ((a - G.start + G.step / 2) % 360 + 720) % 360; };
@@ -541,7 +602,7 @@ function persistirArrasto(d) {
     if (nova.join() !== atual.join()) {
       reordenou = true;
       nova.forEach((sl, i) => {
-        const o = G.byId['d:' + sl]; if (o.ref.provisorio) return;
+        const o = kidsN.find(k => k.slug === sl); if (o.ref.provisorio) return;
         const campos = {};
         if (o.ref.ordem !== i + 1) campos.ordem = i + 1;
         // quem não tinha posição guardada fixa onde está, para não pular de lugar com a nova ordem
@@ -550,34 +611,56 @@ function persistirArrasto(d) {
       });
     }
   }
-  if (subMudou) { subPosAll[vk] = subPos; ls.set('bs-subpos', subPosAll); }
+  if (galhoMudou) { galhoAll[UI.path[0]] = galhoPos; ls.set('bs-galhopos', galhoAll); }
   if (Object.keys(areas).length) store.gravarMapa(areas, 'App: move áreas no mapa geral');
   for (const [file, q] of fm) {
     const msg = 'ordem' in q.fm ? `App: reordena direções (${q.titulo})` : UI.path.length ? `App: move a direção "${q.titulo}" no mapa` : `App: move a ideia "${q.titulo}" no mapa geral`;
     store.remendar(file, { fm: q.fm }, msg);
   }
   if (reordenou) renderPanel(false);
-  if (reordenou || fm.size || Object.keys(areas).length) renderMap({ keep: true });
+  if (reordenou || fm.size || galhoMudou || Object.keys(areas).length) renderMap({ keep: true });
 }
 
-function onNodeClick(n) {
+function onNodeClick(n, ev) {
   if (busy) return;
   if (n.kind === 'root') { if (UI.hl) { UI.hl = null; applyDim(); renderMapUI(); } return; }
   if (n.kind === 'area') { UI.hl = UI.hl === n.area ? null : n.area; applyDim(); renderMapUI(); return; }
   if (n.kind === 'idea') { navigate([n.ref.key], { dir: 'in', node: n }); return; }
   if (n.kind === 'center') { select(null); return; }
-  if (n.kind === 'sub') { navigate([...UI.path, n.owner.slug], { dir: 'in', node: G.byId['d:' + n.owner.slug], sel: n.ref.slug }); return; }
   if (n.kind === 'dir') {
-    if (UI.sel === n.slug && n.hasKids) {
-      clearTimeout(clickT);
-      clickT = setTimeout(() => navigate([...UI.path, n.slug], { dir: 'in', node: n }), 260);
-      return;
-    }
-    select(n.slug);
+    // um clique seleciona; com galhos, abre ou fecha ali mesmo. A troca espera um pouco para o duplo clique
+    // (renomear) não abrir e fechar. Pelo teclado (Enter/Espaço) é na hora.
+    const rel = n.rel;
+    if (ev && ev.detail > 1) { clearTimeout(clickT); return; }
+    if (UI.sel !== rel) select(rel);
+    if (!n.hasKids) return;
+    clearTimeout(clickT);
+    if (ev && ev.detail === 0) alternar(rel);
+    else clickT = setTimeout(() => alternar(rel), RM.matches ? 0 : 250);
   }
 }
+// abre ou fecha os galhos de uma direção (fechar fecha também os de dentro)
+function alternar(rel, forcar) {
+  const idea = ideiaAberta(); if (!idea || busy) return;
+  const d = noPorRel(idea, rel); if (!d || !d.direcoes.length) return;
+  const set = abertosDe(idea), abrir = forcar != null ? forcar : !set.has(rel);
+  if (abrir === set.has(rel)) return;
+  if (abrir) set.add(rel); else fecharRel(set, rel);
+  gravarAbertos(idea, set);
+  if (!abrir && UI.sel && UI.sel.startsWith(rel + '/')) { UI.sel = rel; saveUI(); renderBody(false); }
+  renderMap({ keep: true });
+  if (abrir) { const n = G.byId['d:' + rel]; if (n) enquadrar([n, ...descendants(n.id)], true); }
+  const b = $('#pin [data-act="galhos"]'); if (b && UI.sel === rel) renderBody(false);
+}
+function abrirTudo(abrir) {
+  const idea = ideiaAberta(); if (!idea || busy) return;
+  clearTimeout(clickT);
+  gravarAbertos(idea, new Set(abrir ? todosComGalhos(idea) : []));
+  if (!abrir && UI.sel && UI.sel.includes('/')) { UI.sel = topoRel(UI.sel); saveUI(); }
+  renderPanel(false); renderMap({ keep: true }); enquadrar(null, true);
+}
 
-/* ---------------- navegação e mergulho ---------------- */
+/* ---------------- navegação: mapa geral ↔ ideia ---------------- */
 function navigate(path, opt = {}) {
   if (busy) return;
   if (renaming) renaming.input.blur();
@@ -609,18 +692,25 @@ function goUp() {
 }
 
 /* ---------------- seleção nó <-> aba ---------------- */
-function currentKids() { const R = resolve(UI.path); return R ? R.node.direcoes : []; }
-function select(slug, opt = {}) {
-  const order = [null, ...currentKids().map(d => d.slug)];
-  const from = order.indexOf(UI.sel), to = order.indexOf(slug);
-  UI.sel = slug; saveUI();
-  G.nodes.forEach(n => {
-    if (n.kind === 'dir') { const on = n.slug === slug; n.el.classList.toggle('is-sel', on); n.el.setAttribute('aria-pressed', String(on)); }
-    if (n.kind === 'center') { n.el.classList.toggle('is-sel', slug == null); n.el.setAttribute('aria-pressed', String(slug == null)); }
+// rel = endereço da direção dentro da ideia ("tres-opcoes/um-erro"); null = a própria ideia
+function select(rel, opt = {}) {
+  const idea = ideiaAberta(); if (!idea) return;
+  rel = rel || null;
+  if (rel && !noPorRel(idea, rel)) return;
+  const order = [null, ...visiveisRel(idea, new Set(todosComGalhos(idea)))];
+  const from = order.indexOf(UI.sel), to = order.indexOf(rel);
+  UI.sel = rel; saveUI();
+  if (rel && abrirAte(idea, rel)) renderMap({ keep: true }); // a direção funda precisa aparecer
+  else G.nodes.forEach(n => {
+    if (n.kind === 'dir') { const on = n.rel === rel; n.el.classList.toggle('is-sel', on); n.el.setAttribute('aria-pressed', String(on)); }
+    if (n.kind === 'center') { n.el.classList.toggle('is-sel', rel == null); n.el.setAttribute('aria-pressed', String(rel == null)); }
   });
-  document.querySelectorAll('.tab').forEach(t => { const on = (t.dataset.id || null) === (slug || null); t.setAttribute('aria-selected', String(on)); t.tabIndex = on ? 0 : -1; if (on) t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
+  // as abas são do primeiro anel: a direção funda acende a aba do galho dela
+  const topo = topoRel(rel);
+  document.querySelectorAll('.tab').forEach(t => { const on = (t.dataset.id || null) === topo; t.setAttribute('aria-selected', String(on)); t.tabIndex = on ? 0 : -1; if (on) t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
   renderBody(to < from ? 'slide-l' : 'slide');
-  if (opt.fromTab) { const n = slug ? G.byId['d:' + slug] : G.byId.c; if (n) { n.el.classList.remove('pulse'); void n.el.offsetWidth; n.el.classList.add('pulse'); setTimeout(() => n.el.classList.remove('pulse'), 1100); } }
+  renderMapUI();
+  if (opt.fromTab) { const n = rel ? G.byId['d:' + rel] : G.byId.c; if (n) { n.el.classList.remove('pulse'); void n.el.offsetWidth; n.el.classList.add('pulse'); setTimeout(() => n.el.classList.remove('pulse'), 1100); enquadrar([n], true); } }
 }
 
 /* ---------------- painel ---------------- */
@@ -630,12 +720,12 @@ function renderPanel(slideIn) {
   mainEl.classList.add('is-idea');
   if (!panel) { panel = document.createElement('section'); panel.id = 'panel'; panel.className = 'panel'; panel.setAttribute('aria-label', 'Ideia aberta'); mainEl.appendChild(panel); }
   if (slideIn && !RM.matches) { panel.classList.remove('slide-in'); void panel.offsetWidth; panel.classList.add('slide-in'); }
-  const R = resolve(UI.path); const { idea, node: center, idx } = R; const col = AREA[idea.area].c;
-  const csuf = suffix(idx); const isIdea = UI.path.length === 1;
-  const kids = center.direcoes;
-  if (UI.sel && !kids.some(d => d.slug === UI.sel)) UI.sel = null;
-  const tabs = [`<button class="tab" role="tab" id="tab-c" data-id="" aria-controls="pbody" aria-selected="${!UI.sel}" tabindex="${UI.sel ? -1 : 0}" style="--c:${col}"><span class="bul">${esc(isIdea ? AREA[idea.area].b : csuf)}</span><span class="t">${isIdea ? 'Resumo' : esc(center.titulo)}</span></button>`]
-    .concat(kids.map((d, i) => `<button class="tab" role="tab" id="tab-${esc(d.slug)}" data-id="${esc(d.slug)}" aria-controls="pbody" aria-selected="${UI.sel === d.slug}" tabindex="${UI.sel === d.slug ? 0 : -1}" style="--c:${col}" title="${esc(d.titulo)}"><span class="bul">${esc(csuf + seg(idx.length + 1, i))}</span><span class="t">${esc(d.titulo)}</span></button>`));
+  const idea = resolve(UI.path).idea; const col = AREA[idea.area].c;
+  const kids = idea.direcoes;
+  if (UI.sel && !noPorRel(idea, UI.sel)) UI.sel = null;
+  const topo = topoRel(UI.sel);
+  const tabs = [`<button class="tab" role="tab" id="tab-c" data-id="" aria-controls="pbody" aria-selected="${!topo}" tabindex="${topo ? -1 : 0}" style="--c:${col}"><span class="bul">${esc(AREA[idea.area].b)}</span><span class="t">Resumo</span></button>`]
+    .concat(kids.map((d, i) => `<button class="tab" role="tab" id="tab-${esc(d.slug)}" data-id="${esc(d.slug)}" aria-controls="pbody" aria-selected="${topo === d.slug}" tabindex="${topo === d.slug ? 0 : -1}" style="--c:${col}" title="${esc(d.titulo)}"><span class="bul">${esc(seg(1, i))}</span><span class="t">${esc(d.titulo)}</span></button>`));
   panel.innerHTML = `<div class="tabbar"><div class="tabs" role="tablist" aria-label="Direções" id="tabs">${tabs.join('')}</div>
     <button class="addtab" id="btnAddTab" title="Nova direção (N)">${ICON.plus}<span>Direção</span></button></div>
     <div class="pbody" id="pbody" role="tabpanel"><div class="pin" id="pin"></div></div>`;
@@ -666,23 +756,26 @@ let lapEditando = null; // arquivo cujo lapidado está aberto em markdown cru
 function renderBody(anim) {
   const pin = $('#pin'); if (!pin) return;
   const R = resolve(UI.path); if (!R) return;
-  const { idea, node: center, idx } = R; const col = AREA[idea.area].c;
-  const csuf = suffix(idx); const isIdea = UI.path.length === 1;
-  const kids = center.direcoes;
-  const d = UI.sel ? kids.find(k => k.slug === UI.sel) : null;
-  const target = d || center;
-  const targetIsIdea = !d && isIdea;
-  const tcode = d ? csuf + seg(idx.length + 1, kids.indexOf(d)) : csuf;
+  const idea = R.idea; const col = AREA[idea.area].c;
+  const d = UI.sel ? noPorRel(idea, UI.sel) : null;
+  const target = d || idea;
+  const targetIsIdea = !d;
+  const ix = d ? indicesRel(idea, UI.sel) || [] : [];
+  const tcode = suffix(ix);
   const tkids = target.direcoes;
+  const aberta = !!d && tkids.length > 0 && abertosDe(idea).has(UI.sel);
   if (lapEditando && lapEditando !== target.file) lapEditando = null;
   let h = '';
+  // direção funda: o caminho dela até a ideia, cada passo leva à mãe
+  const maes = d ? ancestraisRel(UI.sel) : [];
+  if (maes.length) h += `<ol class="pcaminho" aria-label="Caminho desta direção">${maes.map(r => `<li><button data-ir="${esc(r)}">${esc(noPorRel(idea, r).titulo)}</button></li>`).join('')}</ol>`;
   h += `<h1 class="ph" id="ph">${esc(target.titulo)}</h1>`;
   if (targetIsIdea) {
     h += `<p class="pmeta">${ideaCode(idea) ? `<b>${esc(ideaCode(idea))}</b>` : ''}<span>${esc(areaNome(idea.area))}</span>${idea.criada ? `<span>criada ${fmtData(idea.criada)}</span>` : ''}<span>ativa</span>${idea.pedido ? '<span>pedido ao Claude</span>' : ''}</p>`;
     h += `<div class="actions"><button class="btn btn--sm" data-act="renomear">${ICON.pen}Renomear</button><button class="btn btn--sm" data-act="guardar">${ICON.drawer}Guardar na gaveta</button><button class="btn btn--sm" data-act="decidir" title="A ideia sai do mapa e vai para a página Edição">${ICON.edicao}Decidir → Edição</button></div>`;
   } else {
-    h += `<p class="pmeta"><b>${esc(codigoDir(idea, tcode))}</b><span>direção</span>${tkids.length ? `<span>${tkids.length} direções dentro</span>` : ''}${!target.lapidado ? '<span>criada por ti</span>' : ''}</p>`;
-    h += `<div class="actions"><button class="btn btn--sm" data-act="renomear">${ICON.pen}Renomear</button>${d && !d.provisorio ? `<button class="btn btn--sm${tkids.length ? ' btn--solid' : ''}" data-act="abrir" title="${tkids.length ? 'Mergulha nesta direção' : 'Mergulha nesta direção para criar direções dentro dela'}">${ICON.dive}Abrir direção</button>` : ''}${!d && !isIdea ? `<button class="btn btn--sm" data-act="voltar">${ICON.back}Voltar um nível</button>` : ''}<button class="btn btn--sm btn--perigo" data-act="apagar" title="Some do mapa na hora; dá para desfazer por alguns segundos">${ICON.trash}Apagar direção</button></div>`;
+    h += `<p class="pmeta"><b>${esc(codigoDir(idea, tcode))}</b><span>${ix.length > 1 ? `direção · nível ${ix.length}` : 'direção'}</span>${tkids.length ? `<span>${tkids.length} direções dentro</span>` : ''}${!target.lapidado ? '<span>criada por ti</span>' : ''}</p>`;
+    h += `<div class="actions"><button class="btn btn--sm" data-act="renomear">${ICON.pen}Renomear</button>${tkids.length ? `<button class="btn btn--sm" data-act="galhos" aria-expanded="${aberta}">${aberta ? ICON.cima + 'Fechar galhos' : ICON.baixo + 'Abrir galhos'}</button>` : ''}<button class="btn btn--sm btn--perigo" data-act="apagar" title="Some do mapa na hora; dá para desfazer por alguns segundos">${ICON.trash}Apagar direção</button></div>`;
   }
   // BRUTO
   h += `<section class="layer bruto" aria-labelledby="lb"><header class="layer-h"><b id="lb">Bruto</b><span>teu · intacto</span></header><div class="layer-b">`;
@@ -715,9 +808,9 @@ function renderBody(anim) {
   if (tkids.length) {
     h += `<span class="lab" style="margin-top:22px">${targetIsIdea ? 'Direções' : 'Direções dentro'} · ${tkids.length}</span><ul class="dlist">`;
     tkids.forEach((k, i) => {
-      const kc = !d ? csuf + seg(idx.length + 1, i) : tcode + seg(idx.length + 2, i);
+      const kc = tcode + seg(ix.length + 1, i);
       const m = [k.direcoes.length ? `${k.direcoes.length} dentro` : '', !k.lapidado ? 'nova' : '', k.pedido ? 'pedido' : ''].filter(Boolean).join(' · ');
-      h += `<li><button class="drow" data-kid="${esc(k.slug)}" style="--c:${col}"><span class="bul">${esc(kc)}</span><span class="t">${esc(k.titulo)}</span><span class="m">${esc(m)}</span></button></li>`;
+      h += `<li><button class="drow" data-kid="${esc(d ? UI.sel + '/' + k.slug : k.slug)}" style="--c:${col}"><span class="bul">${esc(kc)}</span><span class="t">${esc(k.titulo)}</span><span class="m">${esc(m)}</span></button></li>`;
     });
     h += `</ul>`;
   }
@@ -732,7 +825,7 @@ function renderBody(anim) {
   pin.classList.remove('slide', 'slide-l');
   if (anim && !RM.matches) { void pin.offsetWidth; pin.classList.add(anim); }
   if (anim !== false) $('#pbody').scrollTop = 0;
-  $('#pbody').setAttribute('aria-labelledby', d ? 'tab-' + d.slug : 'tab-c');
+  $('#pbody').setAttribute('aria-labelledby', d ? 'tab-' + topoRel(UI.sel) : 'tab-c');
   bindBody(pin, target, targetIsIdea, d);
 }
 
@@ -756,16 +849,12 @@ function bindBody(pin, target, targetIsIdea, d) {
   setTimeout(cresce);
   const cru = pin.querySelector('#lapCru');
   if (cru) cru.addEventListener('input', () => store.remendar(file, { sec: { 'Lapidado': rebaixar(cru.value, 3) } }, `App: edita o lapidado de "${titulo}"`));
-  pin.querySelectorAll('[data-kid]').forEach(b => b.addEventListener('click', () => {
-    const kid = b.dataset.kid;
-    if (!d) select(kid, { fromTab: true });
-    else navigate([...UI.path, d.slug], { dir: 'in', node: G.byId['d:' + d.slug], sel: kid });
-  }));
+  pin.querySelectorAll('[data-kid]').forEach(b => b.addEventListener('click', () => select(b.dataset.kid, { fromTab: true })));
+  pin.querySelectorAll('[data-ir]').forEach(b => b.addEventListener('click', () => select(b.dataset.ir, { fromTab: true })));
   pin.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => {
     const a = b.dataset.act;
-    if (a === 'renomear') startRename(d ? d.slug : null);
-    if (a === 'abrir') navigate([...UI.path, d.slug], { dir: 'in', node: G.byId['d:' + d.slug] });
-    if (a === 'voltar') goUp();
+    if (a === 'renomear') startRename(d ? UI.sel : null);
+    if (a === 'galhos') alternar(UI.sel);
     if (a === 'guardar') guardar(target);
     if (a === 'decidir') mudarEstado(target, 'edicao');
     if (a === 'apagar') apagarDirecao(target);
@@ -774,6 +863,8 @@ function bindBody(pin, target, targetIsIdea, d) {
     if (a === 'desenvolver') {
       if (target.provisorio) { toast('Dá um nome à direção antes de pedir ao Claude.'); return; }
       store.remendar(file, { fm: { pedido: 'desenvolver' } }, `App: pede ao Claude para desenvolver "${titulo}"`);
+      // as direções do Claude aparecem ali mesmo quando chegam: deixa o galho aberto
+      if (d) { const idea = ideiaAberta(); const set = abertosDe(idea); set.add(UI.sel); gravarAbertos(idea, set); }
       renderMap({ keep: true }); renderBody(false); toast('Pedido enviado. O Claude está desenvolvendo; em 1 a 3 minutos aparece aqui.');
     }
     if (a === 'cancelar') {
@@ -789,12 +880,12 @@ function startRename(slugDir) {
   if (renaming || busy) return;
   const R = resolve(UI.path); if (!R) return;
   const isCenter = slugDir == null;
-  const alvo = isCenter ? R.node : R.node.direcoes.find(k => k.slug === slugDir);
+  const alvo = isCenter ? R.idea : noPorRel(R.idea, slugDir);
   if (!alvo) return;
-  const n = isCenter ? G.byId.c : G.byId['d:' + slugDir];
-  if (!n) return;
   if (!isCenter && UI.sel !== slugDir) select(slugDir);
   if (isCenter && UI.sel) select(null);
+  const n = isCenter ? G.byId.c : G.byId['d:' + slugDir];
+  if (!n) return;
   const ttl = n.el.querySelector('[data-ttl]'); if (!ttl) return;
   const old = alvo.titulo, file = alvo.file, ehIdeia = alvo.kind === 'ideia', provisorio = !!alvo.provisorio;
   const input = document.createElement('input');
@@ -819,7 +910,7 @@ function startRename(slugDir) {
     live(name);
     const span = document.createElement('span'); span.className = 'ttl'; span.dataset.ttl = ''; span.textContent = name;
     input.replaceWith(span);
-    n.title = name; n.el.setAttribute('aria-label', isCenter ? name : `Direção ${n.code}: ${name}`);
+    n.title = name; n.el.setAttribute('aria-label', isCenter ? name : `Direção: ${name}`);
     if (provisorio) { criarDirecao(alvo, name); return; }
     if (name !== old) {
       store.remendar(file, { fm: { titulo: name } }, `App: renomeia ${ehIdeia ? 'ideia' : 'direção'} "${old}" para "${name}"`);
@@ -842,7 +933,10 @@ function newDirection() {
   if (!UI.path.length || busy) return;
   if (renaming) renaming.input.blur();
   const R = resolve(UI.path); if (!R) return;
-  const mae = R.node;
+  // nasce dentro da bolinha selecionada (ou no primeiro anel, com a ideia selecionada)
+  const maeR = UI.sel && noPorRel(R.idea, UI.sel) ? UI.sel : '';
+  const mae = maeR ? noPorRel(R.idea, maeR) : R.idea;
+  if (mae.provisorio) { toast('Dá um nome a esta direção antes de criar outra dentro dela.'); return; }
   const usados = new Set(mae.direcoes.map(k => k.slug));
   let s = 'direcao-nova', k = 2; while (usados.has(s)) s = 'direcao-nova-' + k++;
   const ordem = Math.max(0, ...mae.direcoes.map(x => x.ordem || 0)) + 1;
@@ -851,15 +945,18 @@ function newDirection() {
   store.reconstruir();
   const novo = M().porBase.get(path.replace(/\/direcao\.md$/, ''));
   if (novo) { novo.provisorio = true; provisorios.add(path); }
-  UI.sel = s; saveUI();
+  const rel = maeR ? maeR + '/' + s : s;
+  if (maeR) { const set = abertosDe(R.idea); set.add(maeR); gravarAbertos(R.idea, set); }
+  UI.sel = rel; saveUI();
   renderPanel(false); renderMap({ keep: true });
-  select(s);
-  setTimeout(() => startRename(s), RM.matches ? 0 : 260);
+  select(rel);
+  const n = G.byId['d:' + rel]; if (n) enquadrar([n], true);
+  setTimeout(() => startRename(rel), RM.matches ? 0 : 260);
 }
 const provisorios = new Set();
 function criarDirecao(alvo, name) {
   const provPath = alvo.file;
-  const mae = alvo.mae;
+  const mae = alvo.mae, relAntigo = relDe(alvo), maeR = relDe(mae);
   provisorios.delete(provPath);
   store.files.delete(provPath);
   const usados = new Set(mae.direcoes.filter(k => k.file !== provPath).map(k => k.slug));
@@ -867,9 +964,10 @@ function criarDirecao(alvo, name) {
   while (usados.has(s)) s = `${base}-${k++}`;
   const path = `${mae.base}/direcoes/${s}/direcao.md`;
   store.criar(path, novaDirecao(name, alvo.ordem || mae.direcoes.length), `App: cria a direção "${name}" em "${mae.titulo}"`);
-  if (UI.sel === alvo.slug) { UI.sel = s; saveUI(); }
+  const relNovo = maeR ? maeR + '/' + s : s;
+  if (UI.sel === relAntigo) { UI.sel = relNovo; saveUI(); }
   renderPanel(false); renderMap({ keep: true });
-  const n = G.byId['d:' + s]; if (n) n.el.focus({ preventScroll: true });
+  const n = G.byId['d:' + relNovo]; if (n) n.el.focus({ preventScroll: true });
 }
 // depois de cada reconstrução, as direções ainda sem arquivo continuam marcadas
 function remarcarProvisorios() {
@@ -978,23 +1076,19 @@ function contarDentro(n) { let d = 0, x = n.anexos.length; const walk = k => k.d
 function apagarDirecao(dir) {
   if (!dir || dir.kind !== 'direcao' || busy) return;
   if (renaming) renaming.input.blur();
-  if (dir.provisorio) { provisorios.delete(dir.file); store.files.delete(dir.file); store.reconstruir(); if (UI.sel === dir.slug) UI.sel = null; saveUI(); renderAll({ keep: true }); return; }
+  const rel = relDe(dir), dona = ideiaDe(dir);
+  // se a selecionada está nela (ou é ela), a seleção sobe para a mãe
+  const naTela = UI.etapa === 'brainstorm' && dona && UI.path[0] === dona.key;
+  const subir = () => { if (naTela && UI.sel && (UI.sel === rel || UI.sel.startsWith(rel + '/'))) UI.sel = maeRel(rel); };
+  if (dir.provisorio) { provisorios.delete(dir.file); store.files.delete(dir.file); store.reconstruir(); subir(); saveUI(); renderAll({ keep: true }); return; }
   efetivarAdiado();
   const base = dir.base, titulo = dir.titulo;
   const { d, x } = contarDentro(dir);
   const extra = [d ? plural(d, 'direção dentro', 'direções dentro') : '', x ? plural(x, 'anexo', 'anexos') : ''].filter(Boolean).join(' e ');
-  // se a direção está aberta (ou contém a aberta), a tela sobe para a mãe dela
   const antes = { path: UI.path.slice(), sel: UI.sel };
-  let subiu = false;
-  const R = UI.etapa === 'brainstorm' ? resolve(UI.path) : null;
-  if (R) {
-    const k = R.chain.indexOf(dir);
-    if (k > 0) { UI.path = UI.path.slice(0, k); UI.sel = null; subiu = true; }
-    else if (UI.sel === dir.slug) UI.sel = null;
-  }
-  saveUI();
+  subir(); saveUI();
   store.ocultar(base);
-  renderAll(subiu ? { enter: true } : { keep: true });
+  renderAll({ keep: true });
   const msg = `App: apaga a direção "${titulo}"${extra ? ` (com ${extra})` : ''}`;
   const a = { base, fazer: () => { store.apagarPasta(base, msg); renderNav(); } };
   a.timer = setTimeout(() => { if (adiado === a) { adiado = null; a.fazer(); } }, DESFAZER_MS);
@@ -1004,7 +1098,7 @@ function apagarDirecao(dir) {
     adiado = null; clearTimeout(a.timer);
     store.mostrar(base);
     if (UI.etapa === 'brainstorm') { UI.path = antes.path; UI.sel = antes.sel; saveUI(); }
-    renderAll(subiu ? { enter: true } : { keep: true });
+    renderAll({ keep: true });
     toast('Voltou.');
   } });
 }
@@ -1060,11 +1154,16 @@ function renderMapUI() {
     ui.innerHTML = `<div class="cartouche dyn"><h1>Mapa geral</h1><p>${plural(ativas, 'ideia ativa', 'ideias ativas')} · ${g} na gaveta${hl}</p></div>
       <div class="map-ui map-tr dyn hint"><span>arraste para mover</span><span class="h-opt">pinça dá zoom</span><span class="h-opt">clique na área destaca a linha</span><span>clique na estação abre a ideia</span></div>`;
   } else {
-    ui.innerHTML = `<div class="map-ui map-tr dyn"><button class="btn btn--sm" id="btnNova">${ICON.plus}Nova direção <span class="kbd">N</span></button></div>
-      <div class="map-ui map-br dyn hint"><span>arraste para mover</span><span class="h-opt">pinça dá zoom</span><span class="h-opt">duplo clique ou F2 renomeia</span><span>Esc volta um nível</span></div>`;
+    const idea = ideiaAberta(), maeSel = UI.sel && idea ? noPorRel(idea, UI.sel) : null;
+    const onde = maeSel ? `Cria uma direção dentro de “${maeSel.titulo}” (N)` : 'Cria uma direção no primeiro anel (N)';
+    ui.innerHTML = `<div class="map-ui map-tr dyn"><button class="btn btn--sm" id="btnNova" title="${esc(onde)}">${ICON.plus}Nova direção <span class="kbd">N</span></button></div>
+      <div class="map-ui map-arvore dyn"><div class="zoom" role="group" aria-label="Galhos do mapa"><button class="btn btn--sm" id="btnRecolher" title="Fecha todos os galhos: fica só o primeiro anel">${ICON.cima}Recolher tudo</button><button class="btn btn--sm" id="btnAbrirTudo" title="Abre a árvore inteira">${ICON.baixo}Abrir tudo</button></div></div>
+      <div class="map-ui map-br dyn hint"><span>clique abre e fecha os galhos</span><span class="h-opt">duplo clique renomeia</span><span>Esc sobe um nível</span></div>`;
   }
   [...ui.children].forEach(c => mapEl.appendChild(c));
   const bn = $('#btnNova'); if (bn) bn.addEventListener('click', newDirection);
+  const br = $('#btnRecolher'); if (br) br.addEventListener('click', () => abrirTudo(false));
+  const bt = $('#btnAbrirTudo'); if (bt) bt.addEventListener('click', () => abrirTudo(true));
 }
 function renderAll(opt = {}) {
   renderNav();
@@ -1073,6 +1172,7 @@ function renderAll(opt = {}) {
   etapaEl.hidden = !emEtapa;
   if (emEtapa) { renderCrumbs(); renderGaveta(); etapas.render(); return; }
   if (UI.path.length && !resolve(UI.path)) { UI.path = []; UI.sel = null; saveUI(); }
+  if (UI.path.length && UI.sel) { const idea = ideiaAberta(); if (idea && noPorRel(idea, UI.sel)) abrirAte(idea, UI.sel); }
   renderCrumbs(); renderGaveta();
   renderPanel(opt.panelIn);
   renderMap({ enter: opt.enter, keep: opt.keep });
@@ -1127,7 +1227,11 @@ document.addEventListener('keydown', e => {
     if (!at.hidden) { closeAtalhos(); btnAt.focus(); return; }
     if (typing) { e.target.blur(); return; }
     if (UI.etapa !== 'brainstorm') return;
-    if (UI.path.length) { goUp(); return; }
+    if (UI.path.length) {
+      // direção funda selecionada: a seleção sobe para a mãe; senão volta ao mapa geral
+      if (UI.sel && UI.sel.includes('/')) { const m = maeRel(UI.sel); select(m); const n = G.byId['d:' + m]; if (n) n.el.focus({ preventScroll: true }); return; }
+      goUp(); return;
+    }
     if (UI.hl) { UI.hl = null; applyDim(); renderMapUI(); }
     return;
   }
@@ -1227,6 +1331,9 @@ async function iniciar(b) {
     return;
   }
   estado(null);
+  // estado salvo do tempo de "uma página por direção": vira ideia aberta com a direção selecionada
+  const abertosSalvos = ls.get('bs-abertos', {});
+  if (migrarUI(UI, abertosSalvos, k => ideiaPorKey(k))) { ls.set('bs-abertos', abertosSalvos); saveUI(); }
   if (store.truncado) toast('O repositório ficou grande demais para ler de uma vez; algumas ideias podem faltar.');
   if (store.model.erros.length) toast(`${plural(store.model.erros.length, 'arquivo ignorado', 'arquivos ignorados')}: fora do formato.`);
   renderAll({ enter: true, panelIn: UI.path.length > 0 });
