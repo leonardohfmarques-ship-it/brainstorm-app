@@ -176,6 +176,8 @@ function buildGraph(W, H) {
       let ls_ = labelSide(x, y, cx, cy, W, prefer);
       if (hasKids) ls_ = { side: s < -0.3 ? 't' : 'b', mw: 170 };
       x = Math.max(ls_.side === 'b' || ls_.side === 't' ? 90 : 30, Math.min(W - (ls_.side === 'b' || ls_.side === 't' ? 90 : 30), x));
+      // direção com galhos: deixa espaço para os nomes dos galhos caberem na tela
+      if (hasKids) { const SUB = 96 + 150; x = c >= 0 ? Math.max(cx + 60, Math.min(x, W - SUB)) : Math.min(cx - 60, Math.max(x, SUB)); }
       const code = csuf + seg(idx.length + 1, i);
       const meta = [code, hasKids ? `${d.direcoes.length} dentro` : '', !d.lapidado ? 'nova' : '', d.pedido ? 'pedido ao Claude' : ''].filter(Boolean).join(' · ');
       const id = 'd:' + d.slug;
@@ -184,10 +186,10 @@ function buildGraph(W, H) {
       if (hasKids) {
         const out = c >= 0 ? 1 : -1, m = d.direcoes.length;
         d.direcoes.forEach((sd, j) => {
-          const sxp = x + out * 112, syp = y + (j - (m - 1) / 2) * 34;
+          const sxp = x + out * 96, syp = Math.max(24, Math.min(H - 24, y + (j - (m - 1) / 2) * 40));
           const sid = id + '>' + sd.slug;
           add({ id: sid, kind: 'sub', ref: sd, owner: d, x: sxp, y: syp, parent: id, color: col, r: 6, side: out > 0 ? 'r' : 'l', mw: 190, depth: 2,
-            title: code + seg(idx.length + 2, j), full: sd.titulo, pedido: !!sd.pedido });
+            title: sd.titulo, code: code + seg(idx.length + 2, j), pedido: !!sd.pedido });
           edges.push({ from: id, to: sid, color: col, w: 4, bias: 0, depth: 2 });
         });
       } else if (d.pedido) {
@@ -232,6 +234,14 @@ function buildGraph(W, H) {
       const hx = p.x < c.x ? -1 : 1;
       nd.x = Math.max(16, Math.min(W - 16, p.x + hx * 36)); nd.y = Math.max(16, Math.min(H - 16, p.y + dir * 58));
     }
+  });
+  // galhos sem posição guardada: se o nome não cabe de um lado da tela, vão para o outro
+  const NOME = 150, BR = 96;
+  nodes.forEach(nd => {
+    if (nd.kind !== 'sub' || ok2(subPos[nd.id])) return;
+    const p = byId[nd.parent];
+    if (nd.side === 'r' && p.x + BR + NOME > W && p.x - BR - NOME >= 0) { nd.x = p.x - BR; nd.side = 'l'; }
+    else if (nd.side === 'l' && p.x - BR - NOME < 0 && p.x + BR + NOME <= W) { nd.x = p.x + BR; nd.side = 'r'; }
   });
   nodes.forEach(nd => { if ((nd.kind === 'idea' || nd.kind === 'dir' || nd.kind === 'ghost') && !nd.hasKids) { nd.pref = nd.side; nd.mw0 = nd.mw; } });
   return { nodes, edges, byId, start, step };
@@ -307,14 +317,14 @@ function nodeHTML(n) {
   if (n.kind === 'center') {
     inner = `<span class="dot">${esc(n.code)}</span><span class="lbl b"><span class="ttl" data-ttl>${esc(n.title)}</span><span class="meta">${esc(n.meta)}</span></span>`;
   } else if (n.kind === 'sub') {
-    inner = `<span class="dot"></span><span class="lbl ${n.side}"><span class="ttl">${esc(n.title)}</span><span class="full">${esc(n.full)}</span></span>`;
+    inner = `<span class="dot"></span><span class="lbl ${n.side}"><span class="ttl" title="${esc(n.title)}">${esc(n.title)}</span></span>`;
   } else {
     const metaFirst = n.side.startsWith('t');
     const meta = `<span class="meta">${esc(n.meta)}</span>`;
     const open = n.hasKids ? `<span class="meta open">clique de novo para abrir</span>` : '';
     inner = `<span class="dot"></span><span class="lbl ${n.side}">${metaFirst ? meta : ''}<span class="ttl" data-ttl>${esc(n.title)}</span>${metaFirst ? '' : meta}${open}</span>`;
   }
-  const label = n.kind === 'idea' ? `Abrir ideia: ${n.title}` : n.kind === 'area' ? `Área ${n.title}, ${n.meta}` : n.kind === 'dir' ? `Direção ${n.code}: ${n.title}` : n.kind === 'sub' ? `Direção ${n.title}: ${n.full}` : n.kind === 'ghost' ? `${n.title}. ${n.meta}` : n.title;
+  const label = n.kind === 'idea' ? `Abrir ideia: ${n.title}` : n.kind === 'area' ? `Área ${n.title}, ${n.meta}` : n.kind === 'dir' ? `Direção ${n.code}: ${n.title}` : n.kind === 'sub' ? `Direção ${n.code}: ${n.title}` : n.kind === 'ghost' ? `${n.title}. ${n.meta}` : n.title;
   return { cls: `st st--${n.kind}${sel ? ' is-sel' : ''}${n.pedido ? ' is-pedido' : ''}${n.novo ? ' is-novo' : ''}`, style, html: inner, label };
 }
 

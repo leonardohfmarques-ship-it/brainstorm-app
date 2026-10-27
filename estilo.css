@@ -96,9 +96,8 @@ a{color:inherit;text-underline-offset:3px;text-decoration-thickness:1.5px}
 .st--center .lbl{background:var(--bg);padding:6px 10px 8px;border-radius:8px}
 .st--center .ttl{font:800 22px/1.02 var(--sans);letter-spacing:-.01em}
 .st--sub .dot{--bw:3px}
-.st--sub .ttl{font:500 11px/1 var(--mono);letter-spacing:.06em;color:var(--gray)}
-.st--sub .full{display:none;margin-top:4px;background:var(--ink);color:var(--bg);font:500 13px/1.2 var(--sans);padding:5px 8px;border-radius:4px;width:max-content;max-width:180px}
-.st--sub:hover .full,.st--sub:focus-visible .full{display:block}
+.st--sub .ttl{display:block;font:500 13px/1.1 var(--sans);color:var(--ink);width:max-content;max-width:140px;background:color-mix(in srgb,var(--bg) 85%,transparent);padding:1px 3px;border-radius:3px}
+.st--sub:hover .ttl{text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:3px}
 .st--obras{pointer-events:none;cursor:default}
 .st--obras .dot{--bw:3px;border-style:dashed;background:var(--bg)}
 
