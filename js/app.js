@@ -340,8 +340,13 @@ const foraDoMapa = t => t.closest('.st, .map-ui, .atalhos, .estado, .cartouche, 
 mapEl.addEventListener('wheel', e => {
   if (!store || e.target.closest('.atalhos, .estado')) return;
   e.preventDefault(); pararCam();
-  if (e.ctrlKey || e.metaKey) { const [px, py] = ptMapa(e); zoomEm(px, py, Math.exp(-e.deltaY * 0.01)); }
-  else { CAM.x -= e.deltaX; CAM.y -= e.deltaY; applyCam(); }
+  const [px, py] = ptMapa(e);
+  if (e.ctrlKey || e.metaKey) zoomEm(px, py, Math.exp(-e.deltaY * 0.01)); // pinça do trackpad / ⌘+rolo
+  else if (e.shiftKey) { CAM.x -= e.deltaX || e.deltaY; applyCam(); } // shift+rolo passeia na horizontal
+  else { // rolo do mouse: zoom em volta do cursor (como o Google Maps)
+    const dy = Math.max(-100, Math.min(100, e.deltaY * (e.deltaMode === 1 ? 33 : 1)));
+    zoomEm(px, py, Math.exp(-dy * 0.002));
+  }
 }, { passive: false });
 // Safari no Mac: pinça do trackpad chega como gesture
 let gesto = 1;
@@ -1152,7 +1157,7 @@ function renderMapUI() {
     const ativas = M().ideias.filter(i => i.estado === 'ativa').length, g = guardadas().length;
     const hl = UI.hl ? ` · linha ${areaNome(UI.hl)} em destaque` : '';
     ui.innerHTML = `<div class="cartouche dyn"><h1>Mapa geral</h1><p>${plural(ativas, 'ideia ativa', 'ideias ativas')} · ${g} na gaveta${hl}</p></div>
-      <div class="map-ui map-tr dyn hint"><span>arraste para mover</span><span class="h-opt">pinça dá zoom</span><span class="h-opt">clique na área destaca a linha</span><span>clique na estação abre a ideia</span></div>`;
+      <div class="map-ui map-tr dyn hint"><span>arraste para mover</span><span class="h-opt">rolo ou pinça dá zoom</span><span class="h-opt">clique na área destaca a linha</span><span>clique na estação abre a ideia</span></div>`;
   } else {
     const idea = ideiaAberta(), maeSel = UI.sel && idea ? noPorRel(idea, UI.sel) : null;
     const onde = maeSel ? `Cria uma direção dentro de “${maeSel.titulo}” (N)` : 'Cria uma direção no primeiro anel (N)';
