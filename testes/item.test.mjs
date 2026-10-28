@@ -398,3 +398,102 @@ test('pergunta dele: com resposta, antes das descartadas; repetida ou reservada 
   const t2 = aplicar(COM_RUMO, I.remendoNova(ir, 'Qual é a cor favorita?', 'Preto.'));
   assert.deepEqual(I.lerItem('x/item.md', t2).descartadas, ['Vai ter música / trilha?']);
 });
+
+/* ---------------- Enviar respostas: marca de enviado, "O que entendi" e desatualizado ---------------- */
+const ENVIADO = COM_RUMO
+  .replace('pedido: estrutura, riscos\n', 'enviadas: rumo=0badc0de 12345678\ndesatualizado: estrutura, versao\n')
+  .replace('#### Nota dele\nUm detalhe.\n\n', '#### Nota dele\nUm detalhe.\n\n### O que entendi\nTu queres uma série curta.\nSem convidado.\n\n');
+
+test('marca de enviado: mesma conta do sistema/ferramentas.py', () => {
+  // os mesmos valores estão em sistema/test_ferramentas.py (repositório brainstorm)
+  assert.equal(I.marca(''), '811c9dc5');
+  assert.equal(I.marca('Quem assiste primeiro?\nQuem nunca tatuou.'), '88d8c192');
+  assert.equal(I.codigoResposta('Quem assiste  primeiro?', 'Quem nunca\n tatuou.'), '88d8c192');
+  assert.equal(I.codigoRumo('Quero que vire uma série curta, só eu na câmera.'), 'b01c876b');
+  assert.equal(I.marca('ção 🎨'), '10c2d05d');
+  assert.deepEqual(I.lerMarca('rumo=b01c876b 88d8c192 lixo'), { rumo: 'b01c876b', cods: new Set(['88d8c192']) });
+});
+
+test('"O que entendi" e a marca de enviado: ida e volta exata, leitura e lugar fixo', () => {
+  assert.equal(fechar(abrir(ENVIADO)), ENVIADO);
+  assert.equal(aplicar(ENVIADO, { fm: {}, sec: {} }), ENVIADO);
+  const it = I.lerItem('x/item.md', ENVIADO);
+  assert.equal(it.entendido, 'Tu queres uma série curta.\nSem convidado.');
+  assert.deepEqual(it.perguntas.map(p => p.q), ['Quem assiste primeiro?', 'Precisa de convidado / parceiro?']);
+  assert.equal(it.enviadas, 'rumo=0badc0de 12345678');
+  assert.deepEqual(it.desatualizado, ['estrutura', 'versao']);
+  assert.equal(it.rumo, 'Quero que vire uma série curta, sem convidado.\n\n#### Nota dele\nUm detalhe.');
+  // excluir e desfazer com o "O que entendi" no meio volta ao arquivo exato
+  const ex = aplicar(ENVIADO, I.remendoExcluir(it, it.perguntas[0].q));
+  assert.equal(aplicar(ex, I.remendoVolta(ex, it.perguntas[0], 0)), ENVIADO);
+  // nasce logo depois do rumo; sem rumo, primeiro; o rumo que nasce depois vem antes dele
+  const sem = aplicar(COM_RUMO, { sec: { [I.SEC_ENTENDI]: 'Entendi isto.' } });
+  assert.match(sem, /Um detalhe\.\n\n### O que entendi\nEntendi isto\.\n\n### Quem assiste primeiro\?/);
+  const t = aplicar(aplicar(COMPLETO, { sec: { [I.SEC_ENTENDI]: 'Entendi.' } }), I.remendoRumo('Meu rumo.'));
+  assert.match(lerSecao(abrir(t), ['Perguntas']), /^### Para onde eu quero\nMeu rumo\.\n\n### O que entendi\nEntendi\.\n\n### Quem assiste primeiro\?/);
+  // a pergunta dele não pode se chamar assim
+  assert.equal(I.remendoNova(it, 'O que entendi', 'x'), null);
+});
+
+test('botão "Enviar respostas": liga com resposta nova, mudada ou rumo mudado; desliga depois do envio', () => {
+  const m = construir(arquivos());
+  let t = I.novoItem({ cadeia: cadeia(m, 'a'), hoje: '2026-10-28' }).text;
+  t = aplicar(t, { sec: { Perguntas: '### Uma?\n\n### Duas?' } });
+  let it = I.lerItem('x/item.md', t);
+  assert.deepEqual(I.novidades(it), { respostas: 0, rumo: false, algo: false, nunca: true });   // "Responde pelo menos uma"
+  t = aplicar(t, I.remendoResposta('Uma?', 'Sim.'));
+  it = I.lerItem('x/item.md', t);
+  assert.deepEqual(I.novidades(it), { respostas: 1, rumo: false, algo: true, nunca: true });
+  t = aplicar(t, I.remendoRumo('Para lá.'));
+  it = I.lerItem('x/item.md', t);
+  assert.equal(I.novidades(it).rumo, true);
+  // enviar: pedido + marca do que está indo
+  const env = I.remendoEnviar(it);
+  assert.equal(env.fm.pedido, 'respostas');
+  assert.equal(env.fm.enviando, `rumo=${I.codigoRumo('Para lá.')} ${I.codigoResposta('Uma?', 'Sim.')}`);
+  const antes = t;
+  t = aplicar(t, env);
+  it = I.lerItem('x/item.md', t);
+  assert.deepEqual(it.pedidos, ['respostas']);
+  // cancelar devolve o arquivo de antes
+  assert.equal(aplicar(t, I.remendoCancelarEnvio(it)), antes);
+  // a Action responde: "enviando" vira "enviadas" e o botão desliga
+  t = aplicar(t, { fm: { pedido: null, enviando: null, enviadas: it.enviando } });
+  it = I.lerItem('x/item.md', t);
+  assert.deepEqual(I.novidades(it), { respostas: 0, rumo: false, algo: false, nunca: false });   // "Nada novo"
+  // mudar uma resposta, responder outra, só espaços a mais (não conta), apagar uma (não conta)
+  assert.equal(I.novidades(I.lerItem('x/item.md', aplicar(t, I.remendoResposta('Uma?', '  Sim.  ')))).algo, false);
+  assert.equal(I.novidades(I.lerItem('x/item.md', aplicar(t, I.remendoResposta('Uma?', 'Não.')))).respostas, 1);
+  assert.equal(I.novidades(I.lerItem('x/item.md', aplicar(t, I.remendoResposta('Duas?', 'Também.')))).respostas, 1);
+  assert.equal(I.novidades(I.lerItem('x/item.md', aplicar(t, I.remendoResposta('Uma?', '')))).algo, false);
+  const r2 = I.novidades(I.lerItem('x/item.md', aplicar(t, I.remendoRumo('Outro lugar.'))));
+  assert.deepEqual([r2.respostas, r2.rumo], [0, true]);
+  // apagar o rumo enviado também conta como mudança
+  assert.equal(I.novidades(I.lerItem('x/item.md', aplicar(t, I.remendoRumo('')))).rumo, true);
+  // a lista lateral vê o pedido aberto (busca a cada 20 s)
+  assert.deepEqual(I.lerPedidos('respostas, riscos, outro'), ['respostas', 'riscos']);
+});
+
+test('desatualizado: lê, "manter assim" tira um, o exemplo local marca só os prontos e não toca no que é dele', () => {
+  const it = I.lerItem('x/item.md', ENVIADO);
+  assert.equal(aplicar(ENVIADO, I.remendoManter(it, 'versao')), ENVIADO.replace('desatualizado: estrutura, versao', 'desatualizado: estrutura'));
+  assert.equal(aplicar(ENVIADO, I.remendoManter(I.lerItem('x/item.md', ENVIADO.replace(', versao', '')), 'estrutura')), ENVIADO.replace('desatualizado: estrutura, versao\n', ''));
+  assert.deepEqual(I.lerItem('x/item.md', ENVIADO.replace('estrutura, versao', 'estrutura, nada, riscos')).desatualizado, ['estrutura', 'riscos']);
+  // modo local: o que a Action faria (com "riscos" pedido junto, ele não fica desatualizado)
+  const t0 = aplicar(COM_RUMO, I.remendoEnviar(I.lerItem('x/item.md', COM_RUMO)));
+  const i0 = I.lerItem('x/item.md', t0);
+  const t1 = aplicar(t0, I.exemploRespostas(i0));
+  const i1 = I.lerItem('x/item.md', t1);
+  assert.deepEqual(i1.pedidos, ['estrutura', 'riscos']);
+  assert.equal(i1.enviadas, i0.enviando);
+  assert.equal(i1.enviando, '');
+  assert.deepEqual(i1.desatualizado, ['comparar', 'versao', 'plano']);   // estrutura e riscos estão pedidos
+  assert.ok(i1.entendido.length > 0);
+  assert.equal(I.novidades(i1).algo, false);
+  // o que é dele não muda: rumo, respostas, descartadas, decididas, contexto
+  assert.equal(i1.rumo, i0.rumo);
+  assert.deepEqual(i1.perguntas.slice(0, 2), i0.perguntas);
+  assert.deepEqual(i1.descartadas, i0.descartadas);
+  assert.deepEqual([i1.variaveis, i1.varExtras], [i0.variaveis, i0.varExtras]);
+  assert.equal(lerSecao(abrir(t1), ['Contexto']), lerSecao(abrir(t0), ['Contexto']));
+});

@@ -666,6 +666,22 @@ textarea.pg-r{min-height:48px;font-size:15px;padding:8px 10px;field-sizing:conte
 .pg-rumo-l{font:800 15.5px/1.25 var(--sans)}
 .pg-rumo-l span{margin-left:6px;font:400 10.5px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--gray)}
 textarea.pg-rumo-t{min-height:64px;font-size:15.5px;padding:8px 10px;field-sizing:content;max-height:320px}
+/* o que o Claude entendeu do último envio: lapidado (amarelo), no topo do cartão */
+.pg-ent{margin:0 0 14px;padding:12px 14px;background:var(--lap);border-radius:8px}
+.pg-ent .lab{margin:0 0 6px;color:#4A4430}
+.pg-ent .lab span{margin-left:6px;opacity:.75}
+.pg-ent .md{font-size:15px}
+.pg-ent .md > :last-child{margin-bottom:0}
+/* "Enviar respostas": embaixo das perguntas */
+.pg-envia{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:16px 0 0;padding:12px 0 0;border-top:1.5px solid rgba(17,17,17,.15)}
+.pg-envia .btn{gap:6px}
+.pg-envia .nota{flex:1 1 200px}
+.pg-lendo{margin:16px 0 0}
+/* cartão pronto mas feito antes das respostas novas: aviso discreto, ele decide se refaz */
+.fx--velho .fx-d{background:var(--paper)}
+.fx-desat{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px;padding:8px 10px;border:1.5px dashed rgba(17,17,17,.35);border-radius:8px;font:500 14px/1.3 var(--sans)}
+.fx-desat > span{flex:1 1 160px}
+.fx-desat .btn{gap:6px}
 .pg-nova,.pg-desc{margin:16px 0 0}
 .pg-nova > summary,.pg-desc > summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px}
 .pg-nova > summary::-webkit-details-marker,.pg-desc > summary::-webkit-details-marker{display:none}

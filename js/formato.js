@@ -132,8 +132,9 @@ export function lerSecao(doc, path) {
   return s ? aparar(doc.body.slice(s.start, s.end)).join('\n') : null;
 }
 
-// filhas com lugar fixo dentro da mãe: em Perguntas, "Para onde eu quero" vem antes de tudo e "Descartadas" no fim
-const FILHAS = { perguntas: { primeiro: ['para onde eu quero'], ultimo: ['descartadas'] } };
+// filhas com lugar fixo dentro da mãe: em Perguntas, "Para onde eu quero" vem antes de tudo, "O que entendi" logo
+// depois dele e "Descartadas" no fim
+const FILHAS = { perguntas: { primeiro: ['para onde eu quero', 'o que entendi'], ultimo: ['descartadas'] } };
 
 // content null = apagar a seção inteira (título e texto); se ela não existe, nada muda
 export function gravarSecao(doc, path, content) {
@@ -167,7 +168,8 @@ export function gravarSecao(doc, path, content) {
       const nome = norm(path[1]);
       const irmas = titulos(doc.body).filter(x => x.i >= mae.start && x.i < mae.end && x.level === mae.level + 1);
       const ultima = irmas.find(x => regra.ultimo.includes(norm(x.name)));
-      if (regra.primeiro.includes(nome)) { if (irmas.length) at = irmas[0].i; }
+      const p = regra.primeiro.indexOf(nome);
+      if (p >= 0) { const antes = regra.primeiro.slice(0, p); const dep = irmas.find(x => !antes.includes(norm(x.name))); if (dep) at = dep.i; }
       else if (!regra.ultimo.includes(nome) && ultima) at = ultima.i;
     }
   } else {

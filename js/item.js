@@ -18,7 +18,10 @@ export const FERRAMENTAS = [
   { id: 'plano', nome: 'Plano', sec: 'Plano', pede: 'Gerar plano', de_novo: 'Refazer plano' }
 ];
 export const FERRAMENTA = Object.fromEntries(FERRAMENTAS.map(f => [f.id, f]));
-export const PEDIDOS = FERRAMENTAS.filter(f => f.pede).map(f => f.id);
+// "respostas" não é cartão: é o "Enviar respostas" do cartão Perguntas (o Claude lê e diz o que entendeu)
+export const PEDIDOS = FERRAMENTAS.filter(f => f.pede).map(f => f.id).concat('respostas');
+// cartões que dependem das respostas: ficam "desatualizados" quando ele envia respostas novas
+export const DEPENDEM = ['estrutura', 'riscos', 'comparar', 'versao', 'plano'];
 export const VARIAVEIS = ['Formato', 'Canal', 'Prazo', 'Ritmo', 'Custo', 'Material'];
 export const ESTADOS_ITEM = ['edicao', 'kanban', 'feita'];
 // subseções de Variáveis: as dele e as do Claude ficam separadas, para um nunca apagar o outro
@@ -28,11 +31,13 @@ export const SEC_SUGESTOES = secao('Variáveis', 'Sugestões do Claude');
 // subseções de Perguntas que não são perguntas: o rumo dele (a bússola) no começo e as descartadas no fim
 export const RUMO = 'Para onde eu quero';
 export const DESCARTADAS = 'Descartadas';
+export const ENTENDI = 'O que entendi';    // do Claude, logo depois do rumo: o direcionamento que ele tirou das respostas
 export const SEC_RUMO = secao('Perguntas', RUMO);
 export const SEC_DESCARTADAS = secao('Perguntas', DESCARTADAS);
+export const SEC_ENTENDI = secao('Perguntas', ENTENDI);
 
 const norm = s => String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
-const reservada = t => norm(t) === norm(RUMO) || norm(t) === norm(DESCARTADAS);
+const reservada = t => [RUMO, DESCARTADAS, ENTENDI].some(r => norm(t) === norm(r));
 const umaLinha = s => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
 
 /* ---------------- pedidos: "pedido: perguntas, riscos" ---------------- */
@@ -46,6 +51,40 @@ export function comPedido(lista, id, ligar = true) {
   const s = lista.filter(p => p !== id);
   if (ligar && PEDIDOS.includes(id)) s.push(id);
   return s.length ? s.join(', ') : null;
+}
+
+// "estrutura, riscos" -> só os ids conhecidos, sem repetir
+export function lerLista(v, validos) {
+  const out = [];
+  String(v == null ? '' : v).split(/[,\s]+/).map(norm).forEach(p => { if (validos.includes(p) && !out.includes(p)) out.push(p); });
+  return out;
+}
+
+/* ---------------- marca de enviado: o que já foi para o Claude ----------------
+   Um código de 8 letras (FNV-1a de 32 bits sobre o UTF-8) por resposta enviada e um para o rumo:
+   "enviadas: rumo=xxxxxxxx aaaaaaaa bbbbbbbb". O sistema/ferramentas.py faz a mesma conta. */
+export function marca(s) {
+  let h = 0x811c9dc5;
+  for (const b of new TextEncoder().encode(String(s))) { h ^= b; h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16).padStart(8, '0');
+}
+export const codigoResposta = (q, r) => marca(umaLinha(q) + '\n' + umaLinha(r));
+export const codigoRumo = rumo => marca('rumo\n' + umaLinha(rumo));
+export const marcaDe = it => ['rumo=' + codigoRumo(it.rumo)].concat(it.perguntas.filter(p => p.r.trim()).map(p => codigoResposta(p.q, p.r))).join(' ');
+export function lerMarca(v) {
+  let rumo = null; const cods = new Set();
+  for (const t of String(v || '').split(/\s+/)) {
+    if (t.startsWith('rumo=')) rumo = t.slice(5);
+    else if (/^[0-9a-f]{8}$/.test(t)) cods.add(t);
+  }
+  return { rumo, cods };
+}
+// o que mudou desde o último envio: respostas novas ou mudadas (as que ficaram vazias não contam) e o rumo
+export function novidades(it) {
+  const m = lerMarca(it.enviadas);
+  const respostas = it.perguntas.filter(p => p.r.trim() && !m.cods.has(codigoResposta(p.q, p.r))).length;
+  const rumo = m.rumo != null ? codigoRumo(it.rumo) !== m.rumo : !!it.rumo.trim();
+  return { respostas, rumo, algo: respostas > 0 || rumo, nunca: m.rumo == null && !m.cods.size };
 }
 
 /* ---------------- variáveis: "- Nome: valor" ---------------- */
@@ -110,6 +149,9 @@ export function lerItem(path, text) {
     contexto: lerContexto(ler(['Contexto']) || ''),
     perguntas: pergs.map(b => ({ q: b.titulo, r: b.texto })),
     rumo: ler(['Perguntas', RUMO]) || '', descartadas: lerDescartadas(ler(['Perguntas', DESCARTADAS]) || ''),
+    entendido: ler(['Perguntas', ENTENDI]) || '',
+    enviadas: String(f.enviadas == null ? '' : f.enviadas), enviando: String(f.enviando == null ? '' : f.enviando),
+    desatualizado: lerLista(f.desatualizado, DEPENDEM),
     variaveis: vars.valores, varExtras: vars.extras, sugestoes: sug.valores,
     estrutura: ler(['Estrutura']) || '', riscos: ler(['Riscos']) || '', referencias: ler(['Referências']) || '',
     comparar: ler(['Comparar']) || '', versao: ler(['Versão final']) || '',
@@ -243,6 +285,23 @@ export function remendoNova(it, q, r) {
   return { sec };
 }
 export const remendoVariaveis = (valores, extras) => ({ sec: { [SEC_DECIDIDAS]: escreverVariaveis(valores, extras) } });
+
+/* ----- enviar respostas: o pedido "respostas" leva junto a marca do que está indo ----- */
+export const remendoEnviar = it => ({ fm: { pedido: comPedido(it.pedidos, 'respostas'), enviando: marcaDe(it) } });
+export const remendoCancelarEnvio = it => ({ fm: { pedido: comPedido(it.pedidos, 'respostas', false), enviando: null } });
+// "manter assim": tira o aviso de desatualizado de um cartão sem refazer
+export function remendoManter(it, id) {
+  const resto = it.desatualizado.filter(x => x !== id);
+  return { fm: { desatualizado: resto.length ? resto.join(', ') : null } };
+}
+// modo local: o que a Action faria (texto genérico de exemplo, nunca ideias dele)
+export function exemploRespostas(it) {
+  const ex = exemplo('variaveis');
+  const desat = DEPENDEM.filter(f => it.desatualizado.includes(f) || (estadoFerramenta(it, f) === 'pronto' && !it.pedidos.includes(f)));
+  const sec = { [SEC_ENTENDI]: 'Exemplo do modo local: tu queres algo curto e direto, para quem está começando.\nO foco mudou para mostrar o processo, não só o resultado.\nIsso puxa para um formato mais simples de gravar.', ...ex.sec };
+  if (!it.perguntas.some(p => /exemplo de seguimento/i.test(p.q))) sec[secao('Perguntas', 'Pergunta de exemplo de seguimento: o que muda se for em vídeo curto?')] = '';
+  return { fm: { pedido: comPedido(it.pedidos, 'respostas', false), enviando: null, enviadas: it.enviando || marcaDe(it), desatualizado: desat.length ? desat.join(', ') : null }, sec };
+}
 
 // respostas de exemplo do modo local (?local=1): só para testar a tela; textos genéricos, nunca ideias dele
 export function exemplo(id) {
