@@ -25,7 +25,15 @@ export const ESTADOS_ITEM = ['edicao', 'kanban', 'feita'];
 export const SEC_DECIDIDAS = secao('Variáveis', 'Decididas');
 export const SEC_SUGESTOES = secao('Variáveis', 'Sugestões do Claude');
 
+// subseções de Perguntas que não são perguntas: o rumo dele (a bússola) no começo e as descartadas no fim
+export const RUMO = 'Para onde eu quero';
+export const DESCARTADAS = 'Descartadas';
+export const SEC_RUMO = secao('Perguntas', RUMO);
+export const SEC_DESCARTADAS = secao('Perguntas', DESCARTADAS);
+
 const norm = s => String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+const reservada = t => norm(t) === norm(RUMO) || norm(t) === norm(DESCARTADAS);
+const umaLinha = s => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
 
 /* ---------------- pedidos: "pedido: perguntas, riscos" ---------------- */
 export function lerPedidos(v) {
@@ -90,7 +98,7 @@ export function lerItem(path, text) {
   const doc = abrir(text);
   const f = lerCampos(doc);
   const ler = p => lerSecao(doc, p);
-  const pergs = blocos(ler(['Perguntas']) || '').blocos;
+  const pergs = blocos(ler(['Perguntas']) || '').blocos.filter(b => !reservada(b.titulo));
   const vars = lerVariaveis(ler(['Variáveis', 'Decididas']) || '');
   const sug = lerVariaveis(ler(['Variáveis', 'Sugestões do Claude']) || '');
   const est = String(f.estado == null ? '' : f.estado).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
@@ -101,6 +109,7 @@ export function lerItem(path, text) {
     pedidos: lerPedidos(f.pedido),
     contexto: lerContexto(ler(['Contexto']) || ''),
     perguntas: pergs.map(b => ({ q: b.titulo, r: b.texto })),
+    rumo: ler(['Perguntas', RUMO]) || '', descartadas: lerDescartadas(ler(['Perguntas', DESCARTADAS]) || ''),
     variaveis: vars.valores, varExtras: vars.extras, sugestoes: sug.valores,
     estrutura: ler(['Estrutura']) || '', riscos: ler(['Riscos']) || '', referencias: ler(['Referências']) || '',
     comparar: ler(['Comparar']) || '', versao: ler(['Versão final']) || '',
@@ -185,6 +194,54 @@ ${escreverVariaveis({})}
 
 /* ---------------- remendos das ferramentas (o que o app grava) ---------------- */
 export const remendoResposta = (q, texto) => ({ sec: { [secao('Perguntas', q)]: descer(texto, 4) } });
+
+/* ----- perguntas: o rumo dele, excluir (vira descartada), desfazer, trazer de volta, pergunta dele ----- */
+// "### Descartadas" é uma lista "- pergunta", uma por linha
+export function lerDescartadas(md) {
+  const out = [];
+  for (const ln of String(md || '').split('\n')) { const m = ln.match(/^\s*[-*+]\s+(.*\S)\s*$/); if (m) out.push(m[1]); }
+  return out;
+}
+const comDescartadas = l => l.length ? l.map(q => '- ' + umaLinha(q)).join('\n') : null; // lista vazia = some
+// o texto dele, como está (só os títulos descem para dentro da seção)
+export const remendoRumo = texto => ({ sec: { [SEC_RUMO]: descer(texto, 4) } });
+export function remendoExcluir(it, q) {
+  const d = it.descartadas.filter(x => norm(x) !== norm(q)).concat(umaLinha(q));
+  return { sec: { [secao('Perguntas', q)]: null, [SEC_DESCARTADAS]: comDescartadas(d) } };
+}
+// Desfazer: a pergunta volta com a resposta, no lugar k (contando só perguntas), e sai das descartadas
+export function remendoVolta(text, p, k) {
+  const b = blocos(lerSecao(abrir(text), ['Perguntas']) || '');
+  const lista = b.blocos.filter(x => norm(x.titulo) !== norm(p.q));
+  let pos = lista.length, n = 0;
+  for (let j = 0; j < lista.length; j++) {
+    const t = lista[j].titulo;
+    if (norm(t) === norm(DESCARTADAS)) { pos = j; break; }
+    if (reservada(t)) continue;
+    if (n++ === k) { pos = j; break; }
+  }
+  lista.splice(pos, 0, { titulo: p.q, texto: p.r });
+  const partes = lista.map(x => {
+    if (norm(x.titulo) !== norm(DESCARTADAS)) return `### ${x.titulo}${x.texto ? '\n' + x.texto : ''}`;
+    const d = comDescartadas(lerDescartadas(x.texto).filter(y => norm(y) !== norm(p.q)));
+    return d ? `### ${x.titulo}\n${d}` : '';
+  });
+  return { sec: { Perguntas: [b.intro].concat(partes).filter(Boolean).join('\n\n') } };
+}
+// tirar das descartadas: a pergunta volta sem resposta, no fim da lista
+export function remendoTrazer(it, q) {
+  const sec = it.perguntas.some(p => norm(p.q) === norm(q)) ? {} : { [secao('Perguntas', q)]: '' };
+  sec[SEC_DESCARTADAS] = comDescartadas(it.descartadas.filter(x => norm(x) !== norm(q)));
+  return { sec };
+}
+// pergunta dele, já com a resposta; devolve null se o nome não serve (vazio, repetido ou reservado)
+export function remendoNova(it, q, r) {
+  q = umaLinha(q).replace(/#+$/, '').trim();
+  if (!q || reservada(q) || it.perguntas.some(p => norm(p.q) === norm(q))) return null;
+  const sec = { [secao('Perguntas', q)]: descer(String(r || '').trim(), 4) };
+  if (it.descartadas.some(x => norm(x) === norm(q))) sec[SEC_DESCARTADAS] = comDescartadas(it.descartadas.filter(x => norm(x) !== norm(q)));
+  return { sec };
+}
 export const remendoVariaveis = (valores, extras) => ({ sec: { [SEC_DECIDIDAS]: escreverVariaveis(valores, extras) } });
 
 // respostas de exemplo do modo local (?local=1): só para testar a tela; textos genéricos, nunca ideias dele

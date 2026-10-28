@@ -1,7 +1,7 @@
 // Edição por item: decidir na ponta, contexto congelado, ferramentas e pedidos. Exemplos inventados.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { abrir, fechar, aplicar, lerSecao, secao, descer } from '../js/formato.js';
+import { abrir, fechar, aplicar, lerSecao, secao, descer, juntar } from '../js/formato.js';
 import { construir, ehTexto } from '../js/modelo.js';
 import { noPorRel } from '../js/arvore.js';
 import * as I from '../js/item.js';
@@ -289,4 +289,112 @@ Antiga.
   const m3 = construir(arquivos({ 'ideias/youtube/sumiu/decididas/x/item.md': r.text }));
   assert.equal(m3.itens.length, 0);
   assert.equal(m3.erros.length, 1);
+});
+
+/* ---------------- Perguntas: rumo dele, excluir com desfazer, descartadas, pergunta dele ---------------- */
+const COM_RUMO = COMPLETO.replace('## Perguntas\n\n', `## Perguntas
+
+### Para onde eu quero
+Quero que vire uma série curta, sem convidado.
+
+#### Nota dele
+Um detalhe.
+
+`).replace('### Precisa de convidado / parceiro?\n', `### Precisa de convidado / parceiro?
+
+### Descartadas
+- Qual é a cor favorita?
+- Vai ter música / trilha?
+`);
+
+test('rumo e descartadas: ida e volta exata e leitura (perguntas não incluem as duas subseções)', () => {
+  assert.equal(fechar(abrir(COM_RUMO)), COM_RUMO);
+  assert.equal(aplicar(COM_RUMO, { fm: {}, sec: {} }), COM_RUMO);
+  const it = I.lerItem('x/item.md', COM_RUMO);
+  assert.deepEqual(it.perguntas.map(p => p.q), ['Quem assiste primeiro?', 'Precisa de convidado / parceiro?']);
+  assert.equal(it.rumo, 'Quero que vire uma série curta, sem convidado.\n\n#### Nota dele\nUm detalhe.');
+  assert.deepEqual(it.descartadas, ['Qual é a cor favorita?', 'Vai ter música / trilha?']);
+  assert.equal(it.perguntas[1].r, '');
+  // arquivo de antes (sem as duas subseções) lê igual
+  const velho = I.lerItem('x/item.md', COMPLETO);
+  assert.equal(velho.rumo, '');
+  assert.deepEqual(velho.descartadas, []);
+  assert.equal(velho.perguntas.length, 2);
+  // responder uma pergunta não mexe no rumo nem nas descartadas
+  const r = aplicar(COM_RUMO, I.remendoResposta('Precisa de convidado / parceiro?', 'Não.'));
+  assert.equal(r, COM_RUMO.replace('### Precisa de convidado / parceiro?\n', '### Precisa de convidado / parceiro?\nNão.\n'));
+});
+
+test('campo livre (para onde eu quero): nasce no começo de Perguntas, grava o texto dele como está', () => {
+  const r1 = aplicar(COMPLETO, I.remendoRumo('Quero levar para uma série.\n# do meu jeito'));
+  const i1 = I.lerItem('x/item.md', r1);
+  assert.equal(i1.rumo, 'Quero levar para uma série.\n#### do meu jeito');
+  assert.ok(r1.indexOf('### Para onde eu quero') > r1.indexOf('## Perguntas'));
+  assert.ok(r1.indexOf('### Para onde eu quero') < r1.indexOf('### Quem assiste primeiro?'));
+  assert.deepEqual(i1.perguntas, I.lerItem('x/item.md', COMPLETO).perguntas);
+  // fora de Perguntas nada muda
+  assert.equal(r1.replace(/## Perguntas[\s\S]*?## Variáveis/, ''), COMPLETO.replace(/## Perguntas[\s\S]*?## Variáveis/, ''));
+  // trocar o texto troca só ele; voltar ao texto de antes volta ao arquivo de antes
+  const r2 = aplicar(r1, I.remendoRumo('Outro rumo.'));
+  assert.equal(I.lerItem('x/item.md', r2).rumo, 'Outro rumo.');
+  assert.equal(aplicar(r2, I.remendoRumo('Quero levar para uma série.\n# do meu jeito')), r1);
+  // item novo, vazio: rumo, pergunta dele e descartada ficam cada um no seu lugar
+  const m = construir(arquivos());
+  const novo = I.novoItem({ cadeia: cadeia(m, 'a'), hoje: '2026-10-28' }).text;
+  let t = aplicar(novo, I.remendoNova(I.lerItem('x/item.md', novo), 'Quanto tempo tenho?', 'Duas semanas.'));
+  t = aplicar(t, I.remendoRumo('Ser um vídeo só.'));
+  t = aplicar(t, I.remendoExcluir(I.lerItem('x/item.md', t), 'Quanto tempo tenho?'));
+  t = aplicar(t, I.remendoNova(I.lerItem('x/item.md', t), 'Para quem é', ''));
+  const it = I.lerItem('x/item.md', t);
+  assert.equal(it.rumo, 'Ser um vídeo só.');
+  assert.deepEqual(it.perguntas.map(p => p.q), ['Para quem é']);
+  assert.deepEqual(it.descartadas, ['Quanto tempo tenho?']);
+  assert.match(lerSecao(abrir(t), ['Perguntas']), /^### Para onde eu quero\nSer um vídeo só\.\n\n### Para quem é\n\n### Descartadas\n- Quanto tempo tenho\?$/);
+  assert.equal(fechar(abrir(t)), t);
+});
+
+test('excluir pergunta: vira descartada; Desfazer devolve o arquivo exato; excluir de vez fica', () => {
+  const it = I.lerItem('x/item.md', COMPLETO);
+  const p = it.perguntas[0];
+  const ex = aplicar(COMPLETO, I.remendoExcluir(it, p.q));
+  const i1 = I.lerItem('x/item.md', ex);
+  assert.deepEqual(i1.perguntas.map(x => x.q), ['Precisa de convidado / parceiro?']);
+  assert.deepEqual(i1.descartadas, ['Quem assiste primeiro?']);
+  assert.ok(ex.indexOf('### Descartadas') > ex.indexOf('### Precisa') && ex.indexOf('### Descartadas') < ex.indexOf('## Variáveis'));
+  assert.equal(I.estadoFerramenta(i1, 'perguntas'), 'pronto');
+  // Desfazer: a pergunta volta no mesmo lugar, com a resposta, e as Descartadas somem (estavam vazias antes)
+  assert.equal(aplicar(ex, I.remendoVolta(ex, p, 0)), COMPLETO);
+  // Desfazer antes de gravar: os dois remendos juntos na fila dão o arquivo de antes
+  assert.equal(aplicar(COMPLETO, juntar(I.remendoExcluir(it, p.q), I.remendoVolta(ex, p, 0))), COMPLETO);
+  // excluir a segunda numa lista que já tinha descartadas: entra no fim da lista; desfazer volta ao lugar
+  const ir = I.lerItem('x/item.md', COM_RUMO);
+  const ex2 = aplicar(COM_RUMO, I.remendoExcluir(ir, ir.perguntas[1].q));
+  assert.deepEqual(I.lerItem('x/item.md', ex2).descartadas, ['Qual é a cor favorita?', 'Vai ter música / trilha?', 'Precisa de convidado / parceiro?']);
+  assert.equal(I.lerItem('x/item.md', ex2).rumo, ir.rumo);
+  assert.equal(aplicar(ex2, I.remendoVolta(ex2, ir.perguntas[1], 1)), COM_RUMO);
+  // excluir a última pergunta do arquivo (Perguntas no fim) não deixa sobra
+  assert.equal(aplicar('## Perguntas\n\n### Uma?\nsim\n', { sec: { [secao('Perguntas', 'Uma?')]: null } }), '## Perguntas\n');
+  // ordem da fila: resposta, excluir outra, mais resposta: vale a última resposta
+  const fila = juntar(juntar(I.remendoResposta('Precisa de convidado / parceiro?', 'v1'), I.remendoExcluir(it, p.q)), I.remendoResposta('Precisa de convidado / parceiro?', 'v2'));
+  const f = I.lerItem('x/item.md', aplicar(COMPLETO, fila));
+  assert.deepEqual(f.perguntas.map(x => [x.q, x.r]), [['Precisa de convidado / parceiro?', 'v2']]);
+  // trazer de volta depois (sem resposta), e a lista de descartadas some quando esvazia
+  const tr = aplicar(ex, I.remendoTrazer(i1, 'Quem assiste primeiro?'));
+  assert.deepEqual(I.lerItem('x/item.md', tr).perguntas.map(x => x.q), ['Precisa de convidado / parceiro?', 'Quem assiste primeiro?']);
+  assert.ok(!tr.includes('### Descartadas'));
+});
+
+test('pergunta dele: com resposta, antes das descartadas; repetida ou reservada não entra', () => {
+  const ir = I.lerItem('x/item.md', COM_RUMO);
+  const t = aplicar(COM_RUMO, I.remendoNova(ir, '  Onde  gravar? ', 'No estúdio.'));
+  const it = I.lerItem('x/item.md', t);
+  assert.deepEqual(it.perguntas.map(p => [p.q, p.r]).at(-1), ['Onde gravar?', 'No estúdio.']);
+  assert.ok(t.indexOf('### Onde gravar?') < t.indexOf('### Descartadas'));
+  assert.deepEqual(it.descartadas, ir.descartadas);
+  assert.equal(I.remendoNova(ir, 'quem assiste primeiro?', 'x'), null);
+  assert.equal(I.remendoNova(ir, 'Descartadas', 'x'), null);
+  assert.equal(I.remendoNova(ir, 'Para onde eu quero', 'x'), null);
+  // uma descartada que ele mesmo escreve de novo sai das descartadas
+  const t2 = aplicar(COM_RUMO, I.remendoNova(ir, 'Qual é a cor favorita?', 'Preto.'));
+  assert.deepEqual(I.lerItem('x/item.md', t2).descartadas, ['Vai ter música / trilha?']);
 });

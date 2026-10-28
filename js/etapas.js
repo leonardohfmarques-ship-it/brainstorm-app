@@ -73,6 +73,7 @@ export function criarEtapas(ctx) {
   let ctxAberto = false;              // o contexto herdado começa recolhido
   const nivAberto = new Set();        // níveis do contexto abertos (a ponta abre sozinha)
   let cmpAberto = false;              // Comparar começa recolhido
+  let novaAberta = false, descAberto = false; // Perguntas: "pergunta minha" e "Descartadas" começam fechadas
   function ligarLadoEd() { ligarLado(k => { UI.ed = k; campoAberto = null; ctx.saveUI(); renderEdicao(); el.querySelector('.et-corpo').scrollTop = 0; }); }
 
   function renderEdicao() {
@@ -148,9 +149,20 @@ export function criarEtapas(ctx) {
 
     // 1 · Aprofundar
     const respondidas = it.perguntas.filter(p => p.r.trim()).length;
-    const pergs = it.perguntas.length
-      ? `<ol class="pergs">${it.perguntas.map((p, k) => `<li><label class="pg-q" for="pg-${k}">${esc(p.q)}</label><textarea class="notas pg-r" id="pg-${k}" data-resp="${k}" rows="2" placeholder="Tua resposta…">${esc(p.r)}</textarea></li>`).join('')}</ol>`
-      : (est('perguntas') === 'obras' ? '' : `<p class="empty">O Claude faz de 5 a 8 perguntas certeiras (público, objetivo, gancho, diferencial…). Tu respondes aqui mesmo; as respostas entram em tudo o que ele escrever depois.</p>`);
+    // o rumo dele (bússola de todas as ferramentas) fica no topo, sempre à vista
+    const rumo = `<div class="pg-rumo"><label class="pg-rumo-l" for="pg-rumo">Para onde eu quero levar isto <span>nas minhas palavras</span></label>
+      <textarea class="notas pg-rumo-t" id="pg-rumo" data-rumo rows="2" placeholder="Escreve do teu jeito o que tu queres que isto vire, mesmo que nenhuma pergunta leve lá.">${esc(it.rumo)}</textarea>
+      <small class="nota">É a bússola: Mais perguntas, Estrutura, Riscos, Versão final e Plano seguem isto. O Claude nunca reescreve.</small></div>`;
+    const pergs = rumo + (it.perguntas.length
+      ? `<ol class="pergs">${it.perguntas.map((p, k) => `<li><label class="pg-q" for="pg-${k}">${esc(p.q)}</label><button class="pg-x" data-exclui="${k}" aria-label="Excluir a pergunta: ${esc(p.q)}" title="Não está alinhada: excluir (dá para desfazer)">${ICON.x}</button><textarea class="notas pg-r" id="pg-${k}" data-resp="${k}" rows="2" placeholder="Tua resposta…">${esc(p.r)}</textarea></li>`).join('')}</ol>`
+      : (est('perguntas') === 'obras' ? '' : `<p class="empty">O Claude faz de 5 a 8 perguntas certeiras (público, objetivo, gancho, diferencial…). Tu respondes aqui mesmo; as respostas entram em tudo o que ele escrever depois.</p>`))
+      + `<details class="pg-nova" data-pgnova${novaAberta ? ' open' : ''}><summary><span class="mini">+ Acrescentar uma pergunta minha</span></summary>
+        <div class="pg-nova-b"><label class="lab" for="pg-nova-q">Pergunta</label><input id="pg-nova-q" data-nova-q autocomplete="off" placeholder="A pergunta que faltou">
+        <label class="lab" for="pg-nova-r">Resposta</label><textarea class="notas pg-r" id="pg-nova-r" data-nova-r rows="2" placeholder="A tua resposta"></textarea>
+        <div class="fx-wb"><button class="btn btn--sm btn--solid" data-nova-ok>Acrescentar</button><small class="nota">Entra na lista como as outras.</small></div></div></details>`
+      + (it.descartadas.length ? `<details class="pg-desc" data-pgdesc${descAberto ? ' open' : ''}><summary><span class="lab">Descartadas · ${it.descartadas.length}</span><span class="mini fx-dobra" aria-hidden="true"></span></summary>
+        <ul>${it.descartadas.map((q, k) => `<li><span>${esc(q)}</span><button class="mini" data-traz="${k}">trazer de volta</button></li>`).join('')}</ul>
+        <small class="nota">O Claude não volta a elas nem faz parecidas.</small></details>` : '');
     const vars = `<div class="vars">${I.VARIAVEIS.map(k => {
       const v = it.variaveis[k] || '', sg = it.sugestoes[k] || '';
       return `<div class="var"><label for="var-${k}">${k}</label><input id="var-${k}" data-var="${k}" value="${esc(v)}" autocomplete="off" placeholder="${esc(sg ? 'sugestão: ' + sg : '—')}">${sg && sg !== v ? `<button class="var-sug" data-usa="${k}" title="Usar a sugestão do Claude"><span>Claude</span>${esc(sg)}</button>` : ''}</div>`;
@@ -251,6 +263,48 @@ export function criarEtapas(ctx) {
       const p = it.perguntas[+t.dataset.resp]; if (!p) return;
       gravar(I.remendoResposta(p.q, t.value), `App: responde perguntas em "${titulo}"`);
     }));
+    // o rumo dele: grava como ele escreve (a bússola das ferramentas)
+    const rumo = el.querySelector('[data-rumo]');
+    if (rumo) rumo.addEventListener('input', () => gravar(I.remendoRumo(rumo.value), `App: para onde quer levar "${titulo}"`));
+    // excluir pergunta: some na hora, vira "descartada" e dá para desfazer por 8 s
+    const curta = q => q.length > 48 ? q.slice(0, 47) + '…' : q;
+    const atual = () => porKey(it.key) || it;    // o item mais novo (as respostas mudam sem redesenhar)
+    el.querySelectorAll('[data-exclui]').forEach(b => b.addEventListener('click', () => {
+      const q0 = it.perguntas[+b.dataset.exclui]; if (!q0) return;
+      const j = atual(), k = j.perguntas.findIndex(x => x.q === q0.q), p = j.perguntas[k]; if (!p) return;
+      gravar(I.remendoExcluir(j, p.q), `App: descarta a pergunta "${curta(p.q)}" em "${titulo}"`);
+      renderEdicao();
+      toast(`Pergunta excluída: “${curta(p.q)}”`, { acao: 'Desfazer', ms: 8000, fn: () => {
+        const txt = st().texto(it.file); if (txt == null) return;
+        gravar(I.remendoVolta(txt, p, k), `App: desfaz descartar a pergunta "${curta(p.q)}" em "${titulo}"`);
+        renderEdicao();
+      } });
+    }));
+    el.querySelectorAll('[data-traz]').forEach(b => b.addEventListener('click', () => {
+      const q = it.descartadas[+b.dataset.traz]; if (q == null) return;
+      gravar(I.remendoTrazer(atual(), q), `App: traz de volta a pergunta "${curta(q)}" em "${titulo}"`);
+      renderEdicao();
+    }));
+    // pergunta dele, já com a resposta
+    const nq = el.querySelector('[data-nova-q]'), nr = el.querySelector('[data-nova-r]');
+    const novaOk = () => {
+      if (!nq.value.trim()) { nq.focus(); return; }
+      const r = I.remendoNova(atual(), nq.value, nr.value);
+      if (!r) { toast('Essa pergunta já está na lista.'); nq.focus(); return; }
+      gravar(r, `App: pergunta dele em "${titulo}"`);
+      novaAberta = false; renderEdicao(); toast('Pergunta acrescentada.');
+    };
+    if (nq) {
+      nq.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); nr.focus(); } });
+      nr.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); novaOk(); } });
+      el.querySelector('[data-nova-ok]').addEventListener('click', novaOk);
+    }
+    const pn = el.querySelector('[data-pgnova]');
+    if (pn) {
+      pn.addEventListener('toggle', () => { novaAberta = pn.open; });
+      pn.querySelector('summary').addEventListener('click', () => setTimeout(() => { if (pn.open) nq.focus(); }));
+    }
+    const pd = el.querySelector('[data-pgdesc]'); if (pd) pd.addEventListener('toggle', () => { descAberto = pd.open; });
     // variáveis: as seis juntas, mais as linhas que o app não conhece
     const salvarVars = () => {
       const v = {}; el.querySelectorAll('[data-var]').forEach(x => { v[x.dataset.var] = x.value; });

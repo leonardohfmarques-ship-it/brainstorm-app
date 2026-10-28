@@ -656,6 +656,28 @@ details[open] > summary .fx-dobra::after{content:"fechar"}
 .pergs li::before{content:counter(pg);grid-row:1 / span 2;width:22px;height:22px;border-radius:50%;border:3px solid var(--c);display:grid;place-items:center;font:500 10px/1 var(--mono);box-sizing:border-box;margin-top:1px}
 .pg-q{font:800 15.5px/1.3 var(--sans);text-wrap:pretty}
 textarea.pg-r{min-height:48px;font-size:15px;padding:8px 10px;field-sizing:content;max-height:280px}
+.pergs li{grid-template-columns:28px minmax(0,1fr) auto}
+.pergs li .pg-r{grid-column:2 / span 2}
+.pg-x{width:26px;height:26px;margin:-3px -4px 0 0;display:grid;place-items:center;border:0;border-radius:6px;background:none;color:var(--gray);opacity:.5;cursor:pointer;padding:0}
+.pg-x svg{width:14px;height:14px}
+.pg-x:hover,.pg-x:focus-visible{opacity:1;color:var(--ink);background:rgba(17,17,17,.07)}
+/* o rumo dele: a bússola das ferramentas, no topo do cartão */
+.pg-rumo{margin:0 0 18px;padding:12px 14px 12px 20px;border:2px solid var(--ink);border-radius:8px;box-shadow:inset 6px 0 0 var(--c);display:flex;flex-direction:column;gap:7px}
+.pg-rumo-l{font:800 15.5px/1.25 var(--sans)}
+.pg-rumo-l span{margin-left:6px;font:400 10.5px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--gray)}
+textarea.pg-rumo-t{min-height:64px;font-size:15.5px;padding:8px 10px;field-sizing:content;max-height:320px}
+.pg-nova,.pg-desc{margin:16px 0 0}
+.pg-nova > summary,.pg-desc > summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px}
+.pg-nova > summary::-webkit-details-marker,.pg-desc > summary::-webkit-details-marker{display:none}
+.pg-desc > summary .lab{margin:0}
+.pg-nova-b{display:flex;flex-direction:column;gap:6px;margin:10px 0 0;padding:12px 14px;border:2px dashed rgba(17,17,17,.35);border-radius:8px}
+.pg-nova-b .lab{margin:4px 0 0}
+.pg-nova-b input{width:100%;height:38px;border:2px solid var(--ink);border-radius:8px;background:var(--paper);padding:0 10px;font:800 15px/1 var(--sans);color:var(--ink);min-width:0}
+.pg-nova-b input:focus-visible{box-shadow:0 0 0 3px var(--lap)}
+.pg-nova-b .fx-wb{margin-top:6px}
+.pg-desc ul{list-style:none;margin:8px 0;padding:0;display:flex;flex-direction:column;gap:6px}
+.pg-desc li{display:flex;gap:10px;align-items:baseline;justify-content:space-between;font:500 14px/1.35 var(--sans);color:var(--gray);text-decoration:line-through;text-decoration-color:rgba(17,17,17,.3)}
+.pg-desc li .mini{flex:none;text-decoration:underline}
 
 /* variáveis: campos dele, sugestão do Claude embaixo */
 .vars{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 14px;margin:0 0 12px}

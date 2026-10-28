@@ -132,13 +132,27 @@ export function lerSecao(doc, path) {
   return s ? aparar(doc.body.slice(s.start, s.end)).join('\n') : null;
 }
 
+// filhas com lugar fixo dentro da mãe: em Perguntas, "Para onde eu quero" vem antes de tudo e "Descartadas" no fim
+const FILHAS = { perguntas: { primeiro: ['para onde eu quero'], ultimo: ['descartadas'] } };
+
+// content null = apagar a seção inteira (título e texto); se ela não existe, nada muda
 export function gravarSecao(doc, path, content) {
+  if (content === null) {
+    const s = acharSecao(doc, path); if (!s) return doc;
+    const eof = s.end >= doc.body.length, final = doc.body[doc.body.length - 1] === '';
+    doc.body.splice(s.h, s.end - s.h);
+    if (eof && final && doc.body[doc.body.length - 1] !== '') doc.body.push('');
+    return doc;
+  }
   const novo = aparar(String(content == null ? '' : content).replace(/\r\n/g, '\n').split('\n'));
   const s = acharSecao(doc, path);
   if (s) {
     const temDepois = s.end < doc.body.length;
     const fim = temDepois ? [''] : (doc.body[doc.body.length - 1] === '' ? [''] : []);
-    doc.body.splice(s.start, s.end - s.start, ...novo, ...fim);
+    // "## Seção", linha vazia e logo um título dentro: a linha vazia continua lá (Desfazer volta byte a byte)
+    const velho = doc.body.slice(s.start, s.end), k = velho.findIndex(l => l.trim());
+    const ini = k > 0 && /^#{1,6}[ \t]/.test(velho[k]) && /^#{1,6}[ \t]/.test(novo[0] || '') ? [''] : [];
+    doc.body.splice(s.start, s.end - s.start, ...ini, ...novo, ...fim);
     return doc;
   }
   // não existe: cria dentro da mãe (ou no corpo)
@@ -146,8 +160,17 @@ export function gravarSecao(doc, path, content) {
   if (path.length > 1 && !mae) { gravarSecao(doc, path.slice(0, -1), ''); return gravarSecao(doc, path, content); }
   const level = mae ? mae.level + 1 : 2;
   let at;
-  if (mae) at = mae.end;
-  else {
+  if (mae) {
+    at = mae.end;
+    const regra = path.length === 2 ? FILHAS[norm(path[0])] : null;
+    if (regra) {
+      const nome = norm(path[1]);
+      const irmas = titulos(doc.body).filter(x => x.i >= mae.start && x.i < mae.end && x.level === mae.level + 1);
+      const ultima = irmas.find(x => regra.ultimo.includes(norm(x.name)));
+      if (regra.primeiro.includes(nome)) { if (irmas.length) at = irmas[0].i; }
+      else if (!regra.ultimo.includes(nome) && ultima) at = ultima.i;
+    }
+  } else {
     // seções de cima na ordem do arquivo: entra antes da primeira que vem depois dela
     const k = ORDEM.indexOf(norm(path[0]));
     const depois = k >= 0 ? ORDEM.slice(k + 1).map(n => acharSecao(doc, [n])).find(Boolean) : null;
@@ -199,8 +222,12 @@ export function descer(text, min) {
   return linhas.map((l, i) => eh[i] ? '#'.repeat(Math.min(6, eh[i] + d)) + l.slice(eh[i]) : l).join('\n');
 }
 
+// a ordem das seções no remendo é a da última mudança: uma seção inteira gravada depois de uma resposta (ou o
+// contrário) é reaplicada na mesma ordem em que ele mexeu
 export function juntar(a, b) {
-  return { fm: Object.assign({}, a && a.fm, b && b.fm), sec: Object.assign({}, a && a.sec, b && b.sec) };
+  const sec = Object.assign({}, a && a.sec);
+  for (const k of Object.keys((b && b.sec) || {})) { delete sec[k]; sec[k] = b.sec[k]; }
+  return { fm: Object.assign({}, a && a.fm, b && b.fm), sec };
 }
 
 /* ---------------- slug ---------------- */
