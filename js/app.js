@@ -5,10 +5,12 @@ import { Sessao, escolherInicio, consumirFragmento, enderecoWorker, linkEntrar, 
 import { LocalBackend } from './local.js';
 import { Store } from './sync.js';
 import { AREAS, AREA, temPedido } from './modelo.js';
-import { slug as fazerSlug, novaDirecao } from './formato.js';
+import { slug as fazerSlug, novaDirecao, rebaixar } from './formato.js';
 import { md, hidratar } from './markdown.js';
 import { criarEtapas, nomeEtapa } from './etapas.js';
-import { total as totalTarefas } from './plano.js';
+import { total as totalTarefas, remendo as remendoPlano } from './plano.js';
+import { novoItem, lerVariaveis, escreverVariaveis } from './item.js';
+import { aplicar as aplicarMd } from './formato.js';
 import { relDe, ideiaDe, noPorRel, maeRel, topoRel, ancestraisRel, indicesRel, abertosPadrao, todosComGalhos, fecharRel, visiveisRel, desenharArvore, migrarUI, largNome } from './arvore.js';
 
 const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
@@ -31,7 +33,8 @@ const ICON = {
   esq: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>',
   dir: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
   cima: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>',
-  baixo: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>'
+  baixo: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>',
+  claude: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/></svg>'
 };
 
 /* ---------------- armazenamento local (só conveniências deste navegador) ---------------- */
@@ -102,17 +105,6 @@ const areaNome = id => (AREA[id] || {}).nome || id;
 const viewKey = () => UI.path.length ? UI.path.join('/') : 'geral';
 const linkar = s => esc(s).replace(/https?:\/\/[^\s<]+[^\s<.,;:!?)"'”]/g, u => `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`).replace(/\n/g, '<br>');
 const plural = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
-// títulos que fechariam a seção no arquivo (## dentro do Lapidado, ### dentro das Anotações) descem um nível
-function rebaixar(text, min) {
-  let fence = false;
-  return String(text).split('\n').map(l => {
-    if (/^\s{0,3}(```|~~~)/.test(l)) { fence = !fence; return l; }
-    if (fence) return l;
-    const m = l.match(/^(#{1,6})([ \t]+.*)$/);
-    return m && m[1].length < min ? '#'.repeat(min) + m[2] : l;
-  }).join('\n');
-}
-
 /* ---------------- roteamento 45°/90° ---------------- */
 const f1 = n => Math.round(n * 10) / 10;
 function route(a, b, bias, r) {
@@ -203,7 +195,7 @@ function buildGraph(W, H) {
     const idea = resolve(UI.path).idea;
     const col = AREA[idea.area].c;
     const cx = W * 0.5, cy = H * 0.46;
-    add({ id: 'c', kind: 'center', ref: idea, x: cx, y: cy, color: col, r: 27, side: 'b', mw: 300, depth: 0, pedido: !!idea.pedido,
+    add({ id: 'c', kind: 'center', ref: idea, x: cx, y: cy, color: col, r: 27, side: 'b', mw: 300, depth: 0, pedido: !!idea.pedido, ed: itemAberto(idea),
       title: idea.titulo, meta: [ideaCode(idea), areaNome(idea.area)].filter(Boolean).join(' · '), code: AREA[idea.area].b });
     const ab = abertosDe(idea);
     const R1 = Math.max(180, Math.min(250, Math.min(W, H) * 0.3));
@@ -219,7 +211,7 @@ function buildGraph(W, H) {
           : [hasKids ? `${d.direcoes.length} dentro` : '', d.pedido ? 'pedido ao Claude' : ''].filter(Boolean).join(' · ');
         add({ id, kind: 'dir', ref: d, rel, slug: d.slug, depth, hasKids, aberta, x: cx + p.x, y: cy + p.y, parent: maeId, color: col,
           r: depth === 1 ? 11 : depth === 2 ? 7 : 6, side: 'r', mw: depth === 1 ? 230 : 150, title: d.titulo, meta, code,
-          pedido: !!d.pedido || (!aberta && hasKids && temPedido(d)), novo: !!d.provisorio });
+          pedido: !!d.pedido || (!aberta && hasKids && temPedido(d)), novo: !!d.provisorio, ed: itemAberto(d) });
         edges.push({ from: maeId, to: id, color: col, w: depth === 1 ? 7 : depth === 2 ? 4 : 3, bias: 0, depth: Math.min(depth, 3) });
         if (aberta) walk(d, id, rel, [...ix, i], depth + 1);
         else if (d.pedido && !hasKids) {
@@ -388,6 +380,8 @@ function descendants(id) {
 }
 function ancestors(n) { const out = []; let p = n.parent; while (p) { out.push(p); p = G.byId[p] && G.byId[p].parent; } return out; }
 
+// marca discreta na ponta decidida: "na Edição" (ou "no Kanban"); o clique leva ao item
+const tagEd = it => it ? `<span class="tag-ed" data-ed="${esc(it.key)}" data-etapa="${it.estado === 'kanban' ? 'kanban' : 'edicao'}" title="Abrir “${esc(it.titulo)}” na ${it.estado === 'kanban' ? 'etapa Kanban' : 'Edição'}">${it.estado === 'kanban' ? 'no Kanban' : 'na Edição'}</span>` : '';
 function nodeHTML(n) {
   const style = `--r:${n.r || 0}px;--c:${n.color || '#111'};--mw:${Math.round(n.mw || 220)}px`;
   if (n.kind === 'root') return { cls: 'st st--root', style, html: '<span class="cap">BRAINSTORM</span>', label: 'BRAINSTORM, centro do mapa geral' };
@@ -395,10 +389,11 @@ function nodeHTML(n) {
   const sel = (n.kind === 'dir' && UI.sel === n.rel) || (n.kind === 'center' && !UI.sel);
   let inner = '';
   if (n.kind === 'center') {
-    inner = `<span class="dot">${esc(n.code)}</span><span class="lbl b"><span class="ttl" data-ttl>${esc(n.title)}</span><span class="meta">${esc(n.meta)}</span></span>`;
+    inner = `<span class="dot">${esc(n.code)}</span><span class="lbl b"><span class="ttl" data-ttl>${esc(n.title)}</span><span class="meta">${esc(n.meta)}${n.ed ? ' ' + tagEd(n.ed) : ''}</span></span>`;
   } else {
     const metaFirst = n.side.startsWith('t');
-    const meta = n.meta ? `<span class="meta">${esc(n.meta)}</span>` : '';
+    const metaIn = esc(n.meta) + (n.ed ? (n.meta ? ' ' : '') + tagEd(n.ed) : '');
+    const meta = metaIn ? `<span class="meta">${metaIn}</span>` : '';
     // + / − : galho fechado ou aberto
     const pm = n.kind === 'dir' && n.hasKids ? `<span class="pm pm--${n.side}" aria-hidden="true">${n.aberta ? '−' : '+'}</span>` : '';
     inner = `<span class="dot"></span>${pm}<span class="lbl ${n.side}">${metaFirst ? meta : ''}<span class="ttl" data-ttl>${esc(n.title)}</span>${metaFirst ? '' : meta}</span>`;
@@ -633,6 +628,8 @@ function persistirArrasto(d) {
 
 function onNodeClick(n, ev) {
   if (busy) return;
+  const tag = ev && ev.target && ev.target.closest ? ev.target.closest('[data-ed]') : null;
+  if (tag) { clearTimeout(clickT); irPara(tag.dataset.etapa, tag.dataset.ed); return; }
   if (n.kind === 'root') { if (UI.hl) { UI.hl = null; applyDim(); renderMapUI(); } return; }
   if (n.kind === 'area') { UI.hl = UI.hl === n.area ? null : n.area; applyDim(); renderMapUI(); return; }
   if (n.kind === 'idea') { navigate([n.ref.key], { dir: 'in', node: n }); return; }
@@ -781,11 +778,11 @@ function renderBody(anim) {
   if (maes.length) h += `<ol class="pcaminho" aria-label="Caminho desta direção">${maes.map(r => `<li><button data-ir="${esc(r)}">${esc(noPorRel(idea, r).titulo)}</button></li>`).join('')}</ol>`;
   h += `<h1 class="ph" id="ph">${esc(target.titulo)}</h1>`;
   if (targetIsIdea) {
-    h += `<p class="pmeta">${ideaCode(idea) ? `<b>${esc(ideaCode(idea))}</b>` : ''}<span>${esc(areaNome(idea.area))}</span>${idea.criada ? `<span>criada ${fmtData(idea.criada)}</span>` : ''}<span>ativa</span>${idea.pedido ? '<span>pedido ao Claude</span>' : ''}</p>`;
-    h += `<div class="actions"><button class="btn btn--sm" data-act="renomear">${ICON.pen}Renomear</button><button class="btn btn--sm" data-act="guardar">${ICON.drawer}Guardar na gaveta</button><button class="btn btn--sm" data-act="decidir" title="A ideia sai do mapa e vai para a página Edição">${ICON.edicao}Decidir → Edição</button></div>`;
+    h += `<p class="pmeta">${ideaCode(idea) ? `<b>${esc(ideaCode(idea))}</b>` : ''}<span>${esc(areaNome(idea.area))}</span>${idea.criada ? `<span>criada ${fmtData(idea.criada)}</span>` : ''}<span>ativa</span>${idea.pedido ? '<span>pedido ao Claude</span>' : ''}${idea.itens.length ? `<span>${plural(idea.itens.length, 'decidida', 'decididas')}</span>` : ''}</p>`;
+    h += `<div class="actions"><button class="btn btn--sm" data-act="renomear">${ICON.pen}Renomear</button><button class="btn btn--sm" data-act="guardar">${ICON.drawer}Guardar na gaveta</button>${botaoDecidir(idea, 'a ideia inteira')}</div>`;
   } else {
     h += `<p class="pmeta"><b>${esc(codigoDir(idea, tcode))}</b><span>${ix.length > 1 ? `direção · nível ${ix.length}` : 'direção'}</span>${tkids.length ? `<span>${tkids.length} direções dentro</span>` : ''}${!target.lapidado ? '<span>criada por ti</span>' : ''}</p>`;
-    h += `<div class="actions"><button class="btn btn--sm" data-act="renomear">${ICON.pen}Renomear</button>${tkids.length ? `<button class="btn btn--sm" data-act="galhos" aria-expanded="${aberta}">${aberta ? ICON.cima + 'Fechar galhos' : ICON.baixo + 'Abrir galhos'}</button>` : ''}<button class="btn btn--sm btn--perigo" data-act="apagar" title="Some do mapa na hora; dá para desfazer por alguns segundos">${ICON.trash}Apagar direção</button></div>`;
+    h += `<div class="actions">${botaoDecidir(target, 'esta direção')}<button class="btn btn--sm" data-act="renomear">${ICON.pen}Renomear</button>${tkids.length ? `<button class="btn btn--sm" data-act="galhos" aria-expanded="${aberta}">${aberta ? ICON.cima + 'Fechar galhos' : ICON.baixo + 'Abrir galhos'}</button>` : ''}<button class="btn btn--sm btn--perigo" data-act="apagar" title="Some do mapa na hora; dá para desfazer por alguns segundos">${ICON.trash}Apagar direção</button></div>`;
   }
   // BRUTO
   h += `<section class="layer bruto" aria-labelledby="lb"><header class="layer-h"><b id="lb">Bruto</b><span>teu · intacto</span></header><div class="layer-b">`;
@@ -866,7 +863,7 @@ function bindBody(pin, target, targetIsIdea, d) {
     if (a === 'renomear') startRename(d ? UI.sel : null);
     if (a === 'galhos') alternar(UI.sel);
     if (a === 'guardar') guardar(target);
-    if (a === 'decidir') mudarEstado(target, 'edicao');
+    if (a === 'decidir') decidir(target);
     if (a === 'apagar') apagarDirecao(target);
     if (a === 'editar-lap') { lapEditando = file; renderBody(false); const c = $('#lapCru'); if (c) { c.focus(); c.setSelectionRange(0, 0); } }
     if (a === 'fechar-lap') { lapEditando = null; renderBody(false); }
@@ -984,6 +981,76 @@ function remarcarProvisorios() {
   for (const p of provisorios) { const n = M().porBase.get(p.replace(/\/direcao\.md$/, '')); if (n) n.provisorio = true; else provisorios.delete(p); }
 }
 
+/* ---------------- decidir na ponta: a direção (ou a ideia) vira um item da Edição ----------------
+   O item leva uma cópia congelada do caminho até ela; a ideia continua no Brainstorm e outras pontas podem
+   ser decididas depois. */
+const hojeISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+function cadeiaDe(n) { const c = []; while (n) { c.unshift(n); n = n.kind === 'direcao' ? n.mae : null; } return c; }
+// o item ainda vivo (Edição ou Kanban) que nasceu desta ponta
+function itemAberto(n) {
+  if (!n || !n.itens) return null;
+  const lista = n.kind === 'ideia' ? n.itens.filter(i => i.rel === '') : n.itens;
+  return lista.filter(i => i.estado !== 'feita').pop() || null;
+}
+function botaoDecidir(n, oque) {
+  const it = itemAberto(n);
+  if (it) return `<button class="btn btn--sm btn--solid" data-act="decidir" title="Já decidida: abre o item na ${it.estado === 'kanban' ? 'etapa Kanban' : 'Edição'}">${ICON.edicao}${it.estado === 'kanban' ? 'No Kanban → abrir' : 'Na Edição → abrir'}</button>`;
+  return `<button class="btn btn--sm btn--solid" data-act="decidir" title="Leva ${oque} para a Edição, com o caminho até aqui. A ideia continua no mapa.">${ICON.edicao}Decidir → Edição</button>`;
+}
+function criarItem(cadeia, extra, msg) {
+  const ideia = cadeia[0];
+  const r = novoItem({ cadeia, usados: ideia.itens.map(i => i.slug), hoje: hojeISO() });
+  store.criar(r.path, extra ? aplicarMd(r.text, extra) : r.text, msg);
+  return ideia.key + '/decididas/' + r.slug;
+}
+function decidir(alvo) {
+  if (!alvo || busy) return;
+  if (renaming) renaming.input.blur();
+  if (alvo.provisorio) { toast('Dá um nome à direção antes de decidir.'); return; }
+  const ja = itemAberto(alvo);
+  if (ja) { irPara(ja.estado === 'kanban' ? 'kanban' : 'edicao', ja.key); return; }
+  const key = criarItem(cadeiaDe(alvo), null, `App: decide "${alvo.titulo}" e manda para a Edição`);
+  UI.ed = key; saveUI(); renderNav();
+  if (UI.etapa === 'brainstorm') { renderBody(false); renderMap({ keep: true }); }
+  toast(`Foi para a Edição: “${alvo.titulo}”. A ideia continua aqui.`, { acao: 'Abrir a Edição', fn: () => irPara('edicao', key) });
+}
+// fluxo antigo (a ideia inteira em estado "edicao"): vira um item com a ideia inteira e a ideia volta ao mapa.
+// Escolhas, Versão final e Plano são copiados para o item; o ideia.md fica como estava (só o estado muda).
+function converterAntiga(ideia) {
+  if (!ideia || ideia.kind !== 'ideia') return;
+  const sec = {};
+  const esc0 = lerVariaveis(ideia.edicao.escolhas);
+  if (ideia.edicao.escolhas.trim()) sec['Variáveis/Decididas'] = escreverVariaveis(esc0.valores, esc0.extras);
+  if (ideia.edicao.versao.trim()) sec['Versão final'] = ideia.edicao.versao;
+  if (ideia.temPlano) Object.assign(sec, remendoPlano(ideia.plano).sec);
+  const key = criarItem([ideia], { sec }, `App: passa "${ideia.titulo}" para as ferramentas novas da Edição`);
+  store.remendar(ideia.file, { fm: { estado: 'ativa' } }, `App: volta a ideia "${ideia.titulo}" para o Brainstorm`);
+  UI.ed = key; saveUI();
+  renderAll();
+  toast('Pronto: agora é um item da Edição, e a ideia voltou ao mapa.');
+}
+function verNoMapa(it) {
+  const idea = it.ideia;
+  if (!idea || idea.estado !== 'ativa') { toast('A ideia de origem não está no mapa agora (gaveta ou outra etapa).'); return; }
+  UI.path = [idea.key]; UI.sel = it.no && it.no !== idea ? it.rel : null; saveUI();
+  irPara('brainstorm');
+}
+function apagarItem(it) {
+  if (!it || it.kind !== 'item' || busy) return;
+  efetivarAdiado();
+  const base = it.base, titulo = it.titulo;
+  store.ocultar(base); renderAll();
+  const msg = `App: tira "${titulo}" da Edição (a ideia continua no Brainstorm)`;
+  const a = { base, fazer: () => { store.apagarPasta(base, msg); renderNav(); } };
+  a.timer = setTimeout(() => { if (adiado === a) { adiado = null; a.fazer(); } }, DESFAZER_MS);
+  adiado = a;
+  toast(`Tirado da Edição: “${titulo}”. A direção continua no mapa.`, { acao: 'Desfazer', ms: DESFAZER_MS, fn: () => {
+    if (adiado !== a) return;
+    adiado = null; clearTimeout(a.timer);
+    store.mostrar(base); renderAll(); toast('Voltou.');
+  } });
+}
+
 /* ---------------- gaveta ---------------- */
 const sheet = $('#sheet'), scrim = $('#scrim');
 let lastFocus = null;
@@ -1026,7 +1093,8 @@ scrim.addEventListener('click', closeGaveta);
 const etapaEl = $('#etapa');
 const etapas = criarEtapas({
   UI, saveUI, store: () => store, backend: () => backend, esc, ICON, toast, linkar, fmtData, fmtDataBR, rebaixar, plural, areaNome,
-  irPara: (e, k) => irPara(e, k), mudarEstado: (i, e) => mudarEstado(i, e), apagarDirecao: d => apagarDirecao(d), renderNav: () => renderNav()
+  irPara: (e, k) => irPara(e, k), mudarEstado: (i, e) => mudarEstado(i, e), apagarDirecao: d => apagarDirecao(d), renderNav: () => renderNav(),
+  apagarItem: it => apagarItem(it), verNoMapa: it => verNoMapa(it), converterAntiga: i => converterAntiga(i), local: () => LOCAL
 });
 function renderNav() {
   if (!store || !store.rev) { document.querySelectorAll('.et').forEach(b => { b.classList.toggle('is-on', b.dataset.etapa === UI.etapa); b.querySelector('.et-c').textContent = ''; }); return; }
@@ -1056,6 +1124,16 @@ function flash(id) { const n = G.byId[id]; if (n && n.el) { n.el.classList.add('
 // troca de etapa de uma ideia: só a linha "estado" do arquivo muda
 function mudarEstado(idea, estado) {
   const de = idea.estado, key = idea.key, t = idea.titulo;
+  if (idea.kind === 'item') {
+    const msg = estado === 'kanban' ? (de === 'feita' ? `App: reabre "${t}" no Kanban` : `App: manda "${t}" para o Kanban`)
+      : estado === 'edicao' ? `App: volta "${t}" para a Edição` : `App: conclui "${t}"`;
+    store.remendar(idea.file, { fm: { estado } }, msg);
+    if (estado === 'kanban' && de === 'edicao') { irPara('kanban', key); toast(`No Kanban: ${plural(totalTarefas(idea.plano), 'tarefa', 'tarefas')} em A fazer.`); return; }
+    if (estado === 'edicao') { irPara('edicao', key); toast('Voltou para a Edição.'); return; }
+    renderAll();
+    toast(estado === 'feita' ? 'Concluída. Fica em “Concluídas”, no Kanban.' : 'Reaberta no Kanban.');
+    return;
+  }
   const msg = estado === 'ativa' ? `App: volta a ideia "${t}" para o Brainstorm`
     : estado === 'edicao' ? (de === 'ativa' ? `App: manda a ideia "${t}" para a Edição` : `App: volta "${t}" para a Edição`)
     : estado === 'kanban' ? (de === 'feita' ? `App: reabre "${t}" no Kanban` : `App: manda "${t}" para o Kanban`)
@@ -1226,7 +1304,7 @@ async function buscarRemoto(manual) {
   renderStatus();
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && Date.now() - ultimaBusca > 30000) buscarRemoto(false); });
-const haPedido = () => !!store && !store.pend.size && M().ideias.some(temPedido);
+const haPedido = () => !!store && !store.pend.size && (M().ideias.some(temPedido) || M().itens.some(i => i.pedidos.length > 0));
 setInterval(() => { if (document.visibilityState === 'visible' && Date.now() - ultimaBusca > (haPedido() ? 20000 : 120000)) buscarRemoto(false); }, 10000);
 window.addEventListener('online', () => { if (store && store.pend.size) store.agora(); });
 window.addEventListener('beforeunload', e => { efetivarAdiado(); if (store && store.ocupado) { e.preventDefault(); e.returnValue = ''; } });

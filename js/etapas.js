@@ -2,6 +2,7 @@
 // O Brainstorm (mapa) continua em app.js; aqui só as duas páginas novas, no mesmo visual Diagrama.
 import { AREA } from './modelo.js';
 import * as P from './plano.js';
+import * as I from './item.js';
 import { md, hidratar } from './markdown.js';
 
 const NOME = { brainstorm: 'Brainstorm', edicao: 'Edição', kanban: 'Kanban' };
@@ -41,13 +42,13 @@ export function criarEtapas(ctx) {
   }
 
   /* ---------------- campo de markdown editável (Escolhas, Versão final, Anotações) ---------------- */
-  function campoHTML(id, texto, base, vazio, nota) {
+  function campoHTML(id, texto, base, vazio, nota, ver) {
     if (campoAberto === id) {
       return `<textarea class="cru" data-campo="${esc(id)}" spellcheck="true" aria-label="Editar em markdown">${esc(texto)}</textarea>
         <div class="cru-bar"><button class="btn btn--sm btn--solid" data-fecha="${esc(id)}">Pronto</button><small>${esc(nota || 'Salva sozinho enquanto escreves.')}</small></div>`;
     }
     return texto.trim()
-      ? `<div class="campo-v" role="button" tabindex="0" data-abre="${esc(id)}" aria-label="Editar"><div class="md">${md(texto, base, ctx.backend())}</div></div>`
+      ? `<div class="campo-v" role="button" tabindex="0" data-abre="${esc(id)}" aria-label="Editar">${ver ? ver(texto) : `<div class="md">${md(texto, base, ctx.backend())}</div>`}</div>`
       : `<button class="campo-vazio" data-abre="${esc(id)}">${esc(vazio)}</button>`;
   }
   function ligarCampos(defs, rerender) {
@@ -58,26 +59,230 @@ export function criarEtapas(ctx) {
     });
     el.querySelectorAll('[data-campo]').forEach(t => {
       const d = defs[t.dataset.campo]; if (!d) return;
-      t.addEventListener('input', () => st().remendar(d.file, { sec: { [d.sec]: rebaixar(t.value, 4) } }, d.msg));
+      t.addEventListener('input', () => st().remendar(d.file, { sec: { [d.sec]: rebaixar(t.value, d.min || 4) } }, d.msg));
     });
     el.querySelectorAll('[data-fecha]').forEach(b => b.addEventListener('click', () => { campoAberto = null; rerender(); }));
   }
 
-  /* ---------------- Edição ---------------- */
+  /* ---------------- Edição ----------------
+     Cada item é uma direção (ou ideia) decidida, com o contexto herdado e as ferramentas. As ideias que ainda
+     estão no jeito antigo (a ideia inteira com estado "edicao") aparecem num grupo à parte, como eram. */
+  const itensEm = e => M().itens.filter(x => x.estado === e);
+  const porKey = k => M().ideias.find(x => x.key === k) || M().itens.find(x => x.key === k);
+  const prontas = it => I.FERRAMENTAS.filter(f => I.estadoFerramenta(it, f.id) === 'pronto').length;
+  let ctxAberto = false;              // o contexto herdado começa recolhido
+  const nivAberto = new Set();        // níveis do contexto abertos (a ponta abre sozinha)
+  let cmpAberto = false;              // Comparar começa recolhido
+  function ligarLadoEd() { ligarLado(k => { UI.ed = k; campoAberto = null; ctx.saveUI(); renderEdicao(); el.querySelector('.et-corpo').scrollTop = 0; }); }
+
   function renderEdicao() {
-    const ideias = lista('edicao');
-    const i = ideias.find(x => x.key === UI.ed) || ideias[0];
+    const itens = itensEm('edicao'), antigas = lista('edicao');
+    const todos = itens.concat(antigas);
+    const i = todos.find(x => x.key === UI.ed) || todos[0];
     if (i && UI.ed !== i.key) { UI.ed = i.key; ctx.saveUI(); }
     const metaLista = x => {
+      if (x.kind === 'item') { const em = x.pedidos.length ? ' · Claude escrevendo' : ''; return `${x.codigo ? x.codigo + ' · ' : ''}${prontas(x)} de ${I.FERRAMENTAS.length} prontas${em}`; }
       const n = P.total(x.plano);
       return n ? `plano · ${plural(n, 'tarefa', 'tarefas')}` : x.edicao.escolhas.trim() ? 'escolhas feitas' : 'falta escolher';
     };
-    const lado = ladoHTML('Edição', ideias.length ? `${plural(ideias.length, 'ideia', 'ideias')} decidindo` : 'nada em edição', [{ itens: ideias }], i && i.key, metaLista);
+    const sub = todos.length ? `${plural(todos.length, 'decidida', 'decididas')} · aprofundando` : 'nada em edição';
+    const lado = ladoHTML('Edição', sub, [{ itens }, { nome: 'Ideia inteira (jeito antigo)', itens: antigas }], i && i.key, metaLista);
     if (!i) {
-      el.innerHTML = lado + vazioHTML('Nada em edição', 'No Brainstorm, abre uma ideia e usa “Decidir → Edição”. Depois, no chat do Claude Code, diz “lapidar”.', { act: 'ir-bs', t: 'Ir ao Brainstorm' });
+      el.innerHTML = lado + vazioHTML('Nada em edição', 'No Brainstorm, escolhe a direção que vale (de qualquer nível) e usa “Decidir → Edição”. Ela chega aqui com o caminho até ela.', { act: 'ir-bs', t: 'Ir ao Brainstorm' });
       el.querySelector('[data-act="ir-bs"]').addEventListener('click', () => ctx.irPara('brainstorm'));
       return;
     }
+    if (i.kind === 'item') renderItem(i, lado); else renderAntiga(i, lado);
+  }
+
+  /* ----- item: cabeçalho, linha das ferramentas, contexto e cartões ----- */
+  const ROT = { vazio: 'vazio', obras: 'em obras', pronto: 'pronto' };
+  function renderItem(it, lado) {
+    const a = AREA[it.area];
+    if (campoAberto && !campoAberto.startsWith(it.file + '|')) campoAberto = null;
+    const id = s => it.file + '|' + s;
+    const est = f => I.estadoFerramenta(it, f);
+    const n = P.total(it.plano);
+    const nivel = it.rel ? it.rel.split('/').length : 0;
+    const local = ctx.local();
+    const F = I.FERRAMENTA;
+
+    const obrasHTML = f => `<div class="wait fx-wait" role="status"><strong>Claude escrevendo…</strong><p>Leva de 1 a 3 minutos. Aparece aqui sozinho; podes mexer no resto.</p><div class="rail"><div class="runner"></div></div>
+      <div class="fx-wb"><button class="btn btn--sm" data-cancela="${f.id}">${ICON.x}Cancelar pedido</button>${local ? `<button class="btn btn--sm btn--ghost" data-simula="${f.id}" title="Só no modo local: escreve uma resposta de exemplo">Simular resposta (modo local)</button>` : ''}</div></div>`;
+    const botao = f => {
+      if (!f.pede || est(f.id) === 'obras') return '';
+      // variáveis: "de novo" só depois de o Claude já ter sugerido (o que ele preencheu não conta)
+      const pronto = f.id === 'variaveis' ? Object.keys(it.sugestoes).length > 0 : est(f.id) === 'pronto';
+      return `<button class="btn btn--sm${pronto ? '' : ' btn--solid'}" data-pede="${f.id}" title="${esc(pronto ? f.de_novo : f.pede)}: pede ao Claude, que usa tudo o que já está preenchido">${ICON.claude}${esc(pronto ? f.de_novo : f.pede)}</button>`;
+    };
+    const card = (f, corpo, o = {}) => {
+      const e = est(f.id);
+      const cab = `<span class="fx-d" aria-hidden="true"></span><b class="fx-t">${esc(f.nome)}</b><span class="fx-st">${ROT[e]}${o.extra ? ' · ' + esc(o.extra) : ''}</span><span class="sp"></span>${o.dobra ? `<span class="mini fx-dobra" aria-hidden="true"></span>` : ''}${botao(f)}`;
+      const body = `<div class="fx-b">${e === 'obras' ? obrasHTML(f) : ''}${corpo}</div>`;
+      if (o.dobra) return `<details class="fx fx--${e}${o.cls || ''}" id="fx-${f.id}" data-dobra="${f.id}"${o.aberto ? ' open' : ''}><summary class="fx-h">${cab}</summary>${body}</details>`;
+      return `<section class="fx fx--${e}${o.cls || ''}" id="fx-${f.id}" aria-labelledby="fxt-${f.id}"><header class="fx-h" id="fxt-${f.id}">${cab}</header>${body}</section>`;
+    };
+
+    let h = `<div class="et-corpo" style="--c:${a.c}"><div class="et-in et-in--it">`;
+    h += `<header class="et-h">${metaIdeia(it, [nivel ? `direção · nível ${nivel}` : 'a ideia inteira', `decidida ${it.criado ? fmtData(it.criado) : ''}`.trim()])}<h1 class="ph">${esc(it.titulo)}</h1>
+      <div class="actions">
+        <button class="btn btn--sm" data-act="ver-mapa" title="Abre a ideia no mapa, nesta direção">${ICON.back}Ver no mapa</button>
+        <button class="btn btn--sm btn--ghost btn--perigo" data-act="tirar" title="Tira só este item da Edição; a direção continua no mapa (dá para desfazer)">${ICON.trash}Tirar da Edição</button>
+        <button class="btn btn--sm btn--solid" data-act="kanban"${n ? '' : ' disabled'} title="${n ? 'As tarefas entram em A fazer' : 'Primeiro “Gerar plano”, no fim da página'}">${ICON.kanban}Mandar pro Kanban</button>
+      </div></header>`;
+
+    // linha das ferramentas: uma estação por ferramenta (cheia = pronta, tracejada = em obras)
+    h += `<nav class="fx-linha" aria-label="Ferramentas">${I.FERRAMENTAS.map((f, k) => `<button class="fx-est fx-est--${est(f.id)}" data-pula="${f.id}" title="${esc(f.nome)}: ${ROT[est(f.id)]}"><span class="d" aria-hidden="true"></span><span class="t">${esc(f.nome.split(' ')[0])}</span></button>`).join('')}</nav>`;
+
+    // contexto herdado: o caminho sempre à vista; o texto de cada nível abre e fecha
+    const cx = it.contexto;
+    h += `<details class="fx fx-ctx fx--pronto" id="fx-contexto" data-ctx${ctxAberto ? ' open' : ''}><summary class="fx-h"><span class="fx-d" aria-hidden="true"></span><b class="fx-t">Contexto herdado</b><span class="fx-st">${cx.length ? `congelado ${it.criado ? 'em ' + fmtData(it.criado) : ''}` : 'vazio'}</span><span class="sp"></span><span class="mini fx-dobra" aria-hidden="true"></span>
+      <ol class="ctx-linha" aria-label="Caminho até esta direção">${cx.map((c, k) => `<li class="${k === cx.length - 1 ? 'is-ponta' : ''}"><span class="d" aria-hidden="true"></span><span class="r">${esc(c.rotulo || '')}</span><span class="t">${esc(c.titulo)}</span></li>`).join('')}</ol></summary>
+      <div class="fx-b ctx-b">${cx.map((c, k) => {
+        const ponta = k === cx.length - 1, aberto = nivAberto.has(k) || (ponta && !nivAberto.has(-1 - k));
+        const fala = c.fala ? `<span class="lab">Fala</span><div class="md ctx-fala">${md(c.fala, it.ideia.base, ctx.backend())}</div>` : '';
+        const notas = c.anotacoes ? `<span class="lab">Anotações dele</span><div class="md">${md(c.anotacoes, it.ideia.base, ctx.backend())}</div>` : '';
+        const lap = c.lapidado ? `<div class="ctx-lap"><span class="lab">Lapidado</span><div class="md">${md(c.lapidado, it.ideia.base, ctx.backend())}</div></div>` : '<p class="empty">Sem texto neste nível.</p>';
+        return `<details class="ctx-n${ponta ? ' is-ponta' : ''}" data-niv="${k}"${aberto ? ' open' : ''}><summary><span class="r">${esc(c.rotulo || '')}</span><b>${esc(c.titulo)}</b><span class="mini fx-dobra" aria-hidden="true"></span></summary><div class="ctx-c">${fala}${notas}${lap}</div></details>`;
+      }).join('') || '<p class="empty">Este item não tem contexto guardado.</p>'}</div></details>`;
+
+    // 1 · Aprofundar
+    const respondidas = it.perguntas.filter(p => p.r.trim()).length;
+    const pergs = it.perguntas.length
+      ? `<ol class="pergs">${it.perguntas.map((p, k) => `<li><label class="pg-q" for="pg-${k}">${esc(p.q)}</label><textarea class="notas pg-r" id="pg-${k}" data-resp="${k}" rows="2" placeholder="Tua resposta…">${esc(p.r)}</textarea></li>`).join('')}</ol>`
+      : (est('perguntas') === 'obras' ? '' : `<p class="empty">O Claude faz de 5 a 8 perguntas certeiras (público, objetivo, gancho, diferencial…). Tu respondes aqui mesmo; as respostas entram em tudo o que ele escrever depois.</p>`);
+    const vars = `<div class="vars">${I.VARIAVEIS.map(k => {
+      const v = it.variaveis[k] || '', sg = it.sugestoes[k] || '';
+      return `<div class="var"><label for="var-${k}">${k}</label><input id="var-${k}" data-var="${k}" value="${esc(v)}" autocomplete="off" placeholder="${esc(sg ? 'sugestão: ' + sg : '—')}">${sg && sg !== v ? `<button class="var-sug" data-usa="${k}" title="Usar a sugestão do Claude"><span>Claude</span>${esc(sg)}</button>` : ''}</div>`;
+    }).join('')}</div>${it.varExtras.length ? `<div class="md md-sm var-x">${md(it.varExtras.join('\n'), it.base, ctx.backend())}</div>` : ''}<small class="nota">Tu preenches; o Claude só sugere embaixo de cada campo.</small>`;
+    h += `<h2 class="ed-t fx-sec"><span>1</span>Aprofundar</h2><div class="fx-grid">`;
+    h += card(F.perguntas, pergs, { extra: it.perguntas.length ? `${respondidas} de ${it.perguntas.length} respondidas` : '' });
+    h += card(F.variaveis, vars, { extra: `${I.VARIAVEIS.filter(k => it.variaveis[k]).length} de ${I.VARIAVEIS.length}` });
+    h += `</div>`;
+
+    // 2 · Montar
+    const estruturaVer = txt => {
+      const b = I.blocos(txt);
+      if (!b.blocos.length) return `<div class="md">${md(txt, it.base, ctx.backend())}</div>`;
+      return `${b.intro ? `<div class="md">${md(b.intro, it.base, ctx.backend())}</div>` : ''}<ol class="est-l">${b.blocos.map(x => `<li><b>${esc(x.titulo)}</b>${x.texto ? `<div class="md">${md(x.texto, it.base, ctx.backend())}</div>` : ''}</li>`).join('')}</ol>`;
+    };
+    const compararVer = txt => {
+      const b = I.blocos(txt);
+      if (!b.blocos.length) return `<div class="md">${md(txt, it.base, ctx.backend())}</div>`;
+      return `${b.intro ? `<div class="md">${md(b.intro, it.base, ctx.backend())}</div>` : ''}<div class="cmp">${b.blocos.map(x => `<article class="cmp-c${/^em resumo/i.test(x.titulo) ? ' is-resumo' : ''}"><b>${esc(x.titulo)}</b><div class="md">${md(x.texto, it.base, ctx.backend())}</div></article>`).join('')}</div>`;
+    };
+    const irmas = it.no && it.no.mae ? it.no.mae.direcoes.filter(d => d !== it.no) : it.no === it.ideia ? it.ideia.direcoes : [];
+    h += `<h2 class="ed-t fx-sec"><span>2</span>Montar</h2><div class="fx-grid">`;
+    h += card(F.estrutura, campoHTML(id('est'), it.estrutura, it.base, 'O Claude quebra a ideia em blocos (o roteiro). Ou escreve à mão.', 'Cada bloco começa com ### (ex.: ### 1. Gancho).', estruturaVer));
+    h += card(F.riscos, campoHTML(id('ris'), it.riscos, it.base, 'O que pode dar errado e como evitar. O Claude lista; tu ajustas.', 'Uma linha por risco.'));
+    h += card(F.referencias, `<div class="ref-add"><input data-ref placeholder="Cola um link (ou link de imagem) e Enter" aria-label="Novo link de referência" autocomplete="off"></div>`
+      + campoHTML(id('ref'), it.referencias, it.base, 'Links, nomes, notas. Imagem: cola o link dela.', 'Imagem: ![](link da imagem).'));
+    h += card(F.comparar, (irmas.length && !it.comparar.trim() ? `<p class="empty">Irmãs: ${irmas.map(d => esc(d.titulo)).join(' · ')}</p>` : '')
+      + campoHTML(id('cmp'), it.comparar, it.base, 'O Claude põe as direções irmãs lado a lado e diz o que vale puxar delas.', 'Cada irmã começa com ###.', compararVer), { dobra: true, aberto: cmpAberto || est('comparar') === 'obras' });
+    h += `</div>`;
+
+    // 3 · Fechar
+    let plano = '';
+    if (n) {
+      let k0 = 0;
+      for (const c of P.COLUNAS) {
+        const ts = it.plano[c.id].tarefas; if (!ts.length) continue;
+        plano += `<span class="lab">${esc(c.nome)} · ${ts.length}</span><ol class="plano-l" start="${k0 + 1}">${ts.map(t => `<li>${linkar(t.texto)}</li>`).join('')}</ol>`;
+        k0 += ts.length;
+      }
+      plano += `<div class="fx-wb"><button class="btn btn--sm btn--solid" data-act="kanban">${ICON.kanban}Mandar pro Kanban</button><button class="mini" data-abre="${esc(id('pl'))}">editar a lista</button></div>`;
+      if (campoAberto === id('pl')) plano = `<span class="lab">A fazer</span>` + campoHTML(id('pl'), P.escreverTarefas(it.plano.afazer), it.base, '', 'Uma tarefa por linha: "- verbo e o que fazer".');
+    } else if (est('plano') !== 'obras') plano = `<p class="empty">Quando a Edição estiver boa, “Gerar plano”: de 5 a 12 tarefas concretas, a primeira dá para fazer hoje. Depois “Mandar pro Kanban”.</p>`;
+    h += `<h2 class="ed-t fx-sec"><span>3</span>Fechar</h2><div class="fx-grid">`;
+    h += card(F.versao, campoHTML(id('ver'), it.versao, it.base, 'Texto curto e fechado: o que vai ser feito. O Claude escreve com tudo acima.', 'Títulos aqui começam com ###.'));
+    h += card(F.plano, plano, { cls: ' plano', extra: n ? plural(n, 'tarefa', 'tarefas') : '' });
+    h += `</div></div></div>`;
+
+    const scroll = el.querySelector('.et-corpo') ? el.querySelector('.et-corpo').scrollTop : 0;
+    el.innerHTML = lado + h;
+    hidratar(el, ctx.backend());
+    const corpo = el.querySelector('.et-corpo'); if (corpo) corpo.scrollTop = scroll;
+    ligarLadoEd();
+    ligarCampos({
+      [id('est')]: { file: it.file, sec: 'Estrutura', min: 3, msg: `App: edita a estrutura de "${it.titulo}"` },
+      [id('ris')]: { file: it.file, sec: 'Riscos', min: 3, msg: `App: edita os riscos de "${it.titulo}"` },
+      [id('ref')]: { file: it.file, sec: 'Referências', min: 3, msg: `App: referências de "${it.titulo}"` },
+      [id('cmp')]: { file: it.file, sec: 'Comparar', min: 3, msg: `App: edita a comparação de "${it.titulo}"` },
+      [id('ver')]: { file: it.file, sec: 'Versão final', min: 3, msg: `App: edita a versão final de "${it.titulo}"` },
+      [id('pl')]: { file: it.file, sec: 'Plano/A fazer', min: 4, msg: `App: edita o plano de "${it.titulo}"` }
+    }, renderEdicao);
+    ligarItem(it);
+  }
+
+  function ligarItem(it) {
+    const titulo = it.titulo;
+    const gravar = (patch, msg) => st().remendar(it.file, patch, msg);
+    el.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => {
+      const act = b.dataset.act;
+      if (act === 'ver-mapa') ctx.verNoMapa(it);
+      if (act === 'tirar') ctx.apagarItem(it);
+      if (act === 'kanban' && P.total(it.plano)) ctx.mudarEstado(it, 'kanban');
+    }));
+    el.querySelectorAll('[data-pula]').forEach(b => b.addEventListener('click', () => {
+      const alvo = el.querySelector('#fx-' + b.dataset.pula); if (!alvo) return;
+      if (alvo.tagName === 'DETAILS') alvo.open = true;
+      alvo.scrollIntoView({ behavior: RM.matches ? 'auto' : 'smooth', block: 'start' });
+    }));
+    // pedidos ao Claude (a automação do GitHub responde; o cartão fica "em obras" até lá)
+    el.querySelectorAll('[data-pede]').forEach(b => b.addEventListener('click', () => {
+      const f = I.FERRAMENTA[b.dataset.pede];
+      gravar({ fm: { pedido: I.comPedido(it.pedidos, f.id) } }, `App: pede ao Claude "${f.pede}" em "${titulo}"`);
+      if (f.id === 'comparar') cmpAberto = true;
+      renderEdicao(); ctx.renderNav();
+      toast(ctx.local() ? 'Pedido marcado (modo local: o Claude não roda aqui).' : 'Pedido enviado. Em 1 a 3 minutos aparece aqui.');
+    }));
+    el.querySelectorAll('[data-cancela]').forEach(b => b.addEventListener('click', () => {
+      const f = I.FERRAMENTA[b.dataset.cancela];
+      gravar({ fm: { pedido: I.comPedido(it.pedidos, f.id, false) } }, `App: cancela o pedido "${f.pede}" em "${titulo}"`);
+      renderEdicao(); toast('Pedido cancelado.');
+    }));
+    el.querySelectorAll('[data-simula]').forEach(b => b.addEventListener('click', () => {
+      const f = I.FERRAMENTA[b.dataset.simula], ex = I.exemplo(f.id); if (!ex) return;
+      gravar(Object.assign({ fm: { pedido: I.comPedido(it.pedidos, f.id, false) } }, ex), `App: resposta de exemplo (modo local) para "${f.pede}"`);
+      renderEdicao();
+    }));
+    // respostas: cada pergunta guarda a resposta embaixo dela
+    el.querySelectorAll('[data-resp]').forEach(t => t.addEventListener('input', () => {
+      const p = it.perguntas[+t.dataset.resp]; if (!p) return;
+      gravar(I.remendoResposta(p.q, t.value), `App: responde perguntas em "${titulo}"`);
+    }));
+    // variáveis: as seis juntas, mais as linhas que o app não conhece
+    const salvarVars = () => {
+      const v = {}; el.querySelectorAll('[data-var]').forEach(x => { v[x.dataset.var] = x.value; });
+      gravar(I.remendoVariaveis(v, it.varExtras), `App: variáveis de "${titulo}"`);
+    };
+    el.querySelectorAll('[data-var]').forEach(x => x.addEventListener('input', salvarVars));
+    el.querySelectorAll('[data-usa]').forEach(b => b.addEventListener('click', () => {
+      const x = el.querySelector(`[data-var="${CSS.escape(b.dataset.usa)}"]`); if (!x) return;
+      x.value = it.sugestoes[b.dataset.usa] || ''; salvarVars(); renderEdicao();
+    }));
+    // referência rápida: link vira item da lista; link de imagem vira imagem
+    const ref = el.querySelector('[data-ref]');
+    if (ref) ref.addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const v = ref.value.trim(); if (!v) return;
+      const linha = /^https?:\/\/\S+\.(png|jpe?g|gif|webp)(\?\S*)?$/i.test(v) ? `![](${v})` : `- ${v}`;
+      gravar({ sec: { 'Referências': (it.referencias.trim() ? it.referencias.trim() + '\n' : '') + linha } }, `App: referência nova em "${titulo}"`);
+      renderEdicao();
+      const n = el.querySelector('[data-ref]'); if (n) n.focus();
+    });
+    // o que está aberto continua aberto ao redesenhar
+    const cx = el.querySelector('[data-ctx]'); if (cx) cx.addEventListener('toggle', () => { ctxAberto = cx.open; });
+    const cmp = el.querySelector('[data-dobra="comparar"]'); if (cmp) cmp.addEventListener('toggle', () => { cmpAberto = cmp.open; });
+    el.querySelectorAll('[data-niv]').forEach(d => d.addEventListener('toggle', () => {
+      const k = +d.dataset.niv; nivAberto.delete(k); nivAberto.delete(-1 - k);
+      nivAberto.add(d.open ? k : -1 - k);
+    }));
+  }
+
+  /* ----- jeito antigo: a ideia inteira ----- */
+  function renderAntiga(i, lado) {
     if (campoAberto && !campoAberto.startsWith(i.file + '|')) campoAberto = null;
     const a = AREA[i.area];
     const n = P.total(i.plano);
@@ -89,6 +294,10 @@ export function criarEtapas(ctx) {
         <button class="btn btn--sm" data-act="voltar-bs" title="A ideia volta para o mapa do Brainstorm">${ICON.back}Voltar ao Brainstorm</button>
         <button class="btn btn--sm btn--solid" data-act="kanban"${n ? '' : ' disabled'} title="${n ? 'As tarefas entram em A fazer' : 'Primeiro o plano: ele nasce no chat'}">${ICON.kanban}Mandar pro Kanban</button>
       </div></header>`;
+    h += `<div class="aviso aviso--antiga" role="note"><span class="lab">Jeito antigo · a ideia inteira</span>
+      <p>Agora tu decides <b>uma direção de cada vez</b>: no mapa, cada direção tem “Decidir → Edição”, e ela chega aqui com o caminho até ela e as ferramentas novas.</p>
+      <div class="cmd"><button class="btn btn--sm btn--solid" data-act="voltar-bs">${ICON.back}Voltar ao mapa e decidir uma ponta</button><button class="btn btn--sm" data-act="converter">Usar as ferramentas com a ideia inteira</button></div>
+      <small>Nada se perde: escolhas, versão final e plano vão junto para o item novo.</small></div>`;
     if (!escolhas.trim()) {
       h += `<div class="aviso" role="note"><span class="lab">Falta escolher</span>
         <p>Escolhe no chat do Claude Code:</p>
@@ -132,9 +341,9 @@ export function criarEtapas(ctx) {
     h += `</div></section></div></div></div></div>`;
     const scroll = el.querySelector('.et-corpo') ? el.querySelector('.et-corpo').scrollTop : 0;
     el.innerHTML = lado + h;
+    ligarLadoEd();
     hidratar(el, ctx.backend());
     const corpo = el.querySelector('.et-corpo'); if (corpo) corpo.scrollTop = scroll;
-    ligarLado(k => { UI.ed = k; campoAberto = null; ctx.saveUI(); renderEdicao(); el.querySelector('.et-corpo').scrollTop = 0; });
     ligarCampos({
       [id('esc')]: { file: i.file, sec: 'Edição/Escolhas', msg: `App: escolhas de "${i.titulo}"` },
       [id('ver')]: { file: i.file, sec: 'Edição/Versão final', msg: `App: edita a versão final de "${i.titulo}"` },
@@ -143,6 +352,7 @@ export function criarEtapas(ctx) {
     el.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', async () => {
       const act = b.dataset.act;
       if (act === 'voltar-bs') ctx.mudarEstado(i, 'ativa');
+      if (act === 'converter') ctx.converterAntiga(i);
       if (act === 'kanban' && n) ctx.mudarEstado(i, 'kanban');
       if (act === 'copiar') {
         try { await navigator.clipboard.writeText('lapidar ' + i.titulo); toast('Copiado. Cola no chat do Claude Code.'); }
@@ -156,7 +366,7 @@ export function criarEtapas(ctx) {
 
   /* ---------------- Kanban ---------------- */
   function renderKanban() {
-    const ativas = lista('kanban'), feitas = lista('feita');
+    const ativas = itensEm('kanban').concat(lista('kanban')), feitas = itensEm('feita').concat(lista('feita'));
     const todas = ativas.concat(feitas);
     const i = todas.find(x => x.key === UI.kb) || todas[0];
     if (i && UI.kb !== i.key) { UI.kb = i.key; ctx.saveUI(); }
@@ -178,7 +388,7 @@ export function criarEtapas(ctx) {
       <div class="actions">
         <button class="btn btn--sm" data-act="voltar-ed">${ICON.back}Voltar para Edição</button>
         ${feita ? `<button class="btn btn--sm btn--solid" data-act="reabrir">${ICON.kanban}Reabrir no Kanban</button>`
-          : `<button class="btn btn--sm${n && feitos === n ? ' btn--solid' : ''}" data-act="concluir"${n && feitos === n ? '' : ' disabled'} title="${n && feitos === n ? 'Tudo feito: marca a ideia como concluída' : 'Libera quando tudo estiver em Feito'}">${ICON.check}Concluir ideia</button>`}
+          : `<button class="btn btn--sm${n && feitos === n ? ' btn--solid' : ''}" data-act="concluir"${n && feitos === n ? '' : ' disabled'} title="${n && feitos === n ? 'Tudo feito: marca como concluída' : 'Libera quando tudo estiver em Feito'}">${ICON.check}${i.kind === 'item' ? 'Concluir' : 'Concluir ideia'}</button>`}
       </div></header>`;
     h += `<div class="board" id="board">`;
     P.COLUNAS.forEach((c, ci) => {
@@ -234,7 +444,7 @@ export function criarEtapas(ctx) {
     if (foco) kb.foco = foco;
     renderKanban(); ctx.renderNav();
   }
-  const ideiaKb = () => M().ideias.find(x => x.key === UI.kb);
+  const ideiaKb = () => porKey(UI.kb);
   const idxCol = id => P.COLUNAS.findIndex(c => c.id === id);
 
   function moverPor(i, col, k, acao) {
@@ -254,7 +464,7 @@ export function criarEtapas(ctx) {
     const antes = P.copiar(i.plano);
     gravar(i, P.apagar(i.plano, col, k), `App: apaga uma tarefa de "${i.titulo}"`, { col, i: Math.max(0, k - 1) });
     toast(`Tarefa apagada: “${t.texto.slice(0, 40)}${t.texto.length > 40 ? '…' : ''}”`, { acao: 'Desfazer', ms: 7000, fn: () => {
-      const j = M().ideias.find(x => x.key === i.key); if (!j) return;
+      const j = porKey(i.key); if (!j) return;
       // volta no lugar (as outras mudanças feitas depois continuam)
       const novo = P.copiar(j.plano); novo[col].tarefas.splice(Math.min(k, novo[col].tarefas.length), 0, antes[col].tarefas[k]);
       gravar(j, novo, `App: desfaz apagar tarefa de "${i.titulo}"`, { col, i: k });
@@ -372,7 +582,7 @@ export function criarEtapas(ctx) {
     d.fantasma.remove(); document.body.classList.remove('is-arrastando');
     const col = d.card.parentElement.dataset.col;
     const k = [...d.card.parentElement.querySelectorAll('.card:not(.card--novo)')].indexOf(d.card);
-    const i = M().ideias.find(x => x.key === d.i.key) || d.i;
+    const i = porKey(d.i.key) || d.i;
     if (col === d.de.col && k === d.de.i) { kb.foco = d.de; renderKanban(); return; }
     const msg = col === d.de.col ? `App: reordena o plano de "${i.titulo}"` : `App: tarefa de "${i.titulo}" vai para ${P.COLUNAS[idxCol(col)].nome}`;
     gravar(i, P.mover(i.plano, d.de, { col, i: k }), msg, { col, i: k });
@@ -387,8 +597,8 @@ export function criarEtapas(ctx) {
   return {
     render,
     ocupado: () => !!kb.drag || !!kb.editando || !!kb.criando,
-    contar: e => lista(e).length,
+    contar: e => lista(e).length + itensEm(e).length,
     soltar: () => { kb.editando = kb.criando = null; campoAberto = null; },
-    ideiaAberta: () => UI.etapa === 'edicao' ? M().ideias.find(x => x.key === UI.ed && x.estado === 'edicao') : ideiaKb()
+    ideiaAberta: () => { if (UI.etapa !== 'edicao') return ideiaKb(); const x = porKey(UI.ed); return x && x.estado === 'edicao' ? x : null; }
   };
 }

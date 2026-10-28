@@ -20,9 +20,13 @@ function juntar(a, b) {
   if ((a && a.areas) || (b && b.areas)) return { areas: Object.assign({}, a && a.areas, b && b.areas) };
   return juntarMd(a, b);
 }
-function mensagem(msgs) {
+// várias mudanças num envio só: a mensagem é a última, salvo se houver um pedido ao Claude no meio (a automação
+// das ferramentas da Edição só acorda com "pede ao Claude" na mensagem, então ele vai na frente)
+export function mensagem(msgs) {
   const u = [...new Set(msgs)];
-  return u.length === 1 ? u[0] : `${u[u.length - 1]} (e mais ${u.length - 1})`;
+  const pede = u.filter(m => /pede ao Claude/.test(m)).pop();
+  const prim = pede || u[u.length - 1];
+  return u.length === 1 ? u[0] : `${prim} (e mais ${u.length - 1})`;
 }
 
 export class Store {

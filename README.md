@@ -44,6 +44,9 @@ Ida e volta do formato (inclusive com os arquivos reais de `~/Desktop/BRAINSTORM
 contra uma API de mentira (sem token real): carregar, gravar, juntar mudanças, conflito, criar, sem conexão.
 Seções Edição/Plano, estados, ordem das tarefas e apagar direção (GitHub de mentira e modo local).
 Entrada com GitHub (fragmento, renovação, 401 → renova → repete, Worker vazio) e as rotas do Worker.
+Edição por item (`testes/item.test.mjs`): ida e volta do `item.md`, decidir uma ponta de nível 3 com o contexto
+congelado certo, pedidos ao Claude (lista em `pedido`, mensagem do commit), respostas e variáveis, e a
+compatibilidade com as ideias que estão na Edição do jeito antigo. Exemplos genéricos, nunca texto das ideias.
 
 ## Como grava
 
@@ -62,7 +65,8 @@ Entrada com GitHub (fragmento, renovação, 401 → renova → repete, Worker va
 
     index.html  estilo.css  config.js
     js/app.js        interface (mapa, abas, painel, gaveta, atalhos, teclado, troca de etapa, apagar direção)
-    js/etapas.js     páginas Edição e Kanban
+    js/etapas.js     páginas Edição (itens e as 8 ferramentas) e Kanban
+    js/item.js       item da Edição (decididas/<slug>/item.md): contexto herdado, ferramentas, pedidos
     js/plano.js      tarefas do plano de ação (ler, escrever, mover)
     js/formato.js    frontmatter e seções do markdown
     js/modelo.js     arquivos → árvore de ideias e direções

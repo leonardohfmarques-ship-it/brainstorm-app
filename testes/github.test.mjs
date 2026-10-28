@@ -138,3 +138,24 @@ test('Store: sem conexão guarda na fila e mostra "offline"', async () => {
   assert.equal(s.status, 'salvo');
   assert.ok(r.files.get(f).includes('estado: guardada'));
 });
+
+test('Edição por item: carrega item.md, cria o item (PUT sem sha) e o pedido de ferramenta vai na mensagem', async () => {
+  const ITEM = '---\ntitulo: Reforma de verdade\norigem: direcoes/reforma\nestado: edicao\ncriado: 2026-10-27\n---\n\n## Contexto\n\n## Perguntas\n\n## Variáveis\n\n### Decididas\n- Formato:\n';
+  const r = repoFalso(Object.assign({ 'ideias/youtube/quadro/decididas/velho/item.md': ITEM }, inicial));
+  const s = new Store(novo(r)); await s.carregar();
+  assert.ok(s.files.has('ideias/youtube/quadro/decididas/velho/item.md'));
+  assert.equal(s.model.itens.length, 1);
+  assert.equal(s.model.itens[0].no, s.model.ideias[0].direcoes[0]);
+  const f = 'ideias/youtube/quadro/decididas/reforma/item.md';
+  s.criar(f, ITEM, 'App: decide "Reforma de verdade" e manda para a Edição');
+  s.remendar(f, { fm: { pedido: 'perguntas' } }, 'App: pede ao Claude "Gerar perguntas" em "Reforma de verdade"');
+  s.remendar(f, { sec: { 'Variáveis/Decididas': '- Formato: Reel' } }, 'App: variáveis de "Reforma de verdade"');
+  await s.agora(); clearTimeout(s.timer);
+  const put = r.log.filter(l => l.method === 'PUT');
+  assert.equal(put.length, 1);
+  const body = JSON.parse(put[0].body);
+  assert.equal(body.sha, undefined);
+  assert.match(body.message, /^App: pede ao Claude "Gerar perguntas"/);
+  assert.match(r.files.get(f), /^pedido: perguntas$/m);
+  assert.match(r.files.get(f), /### Decididas\n- Formato: Reel/);
+});

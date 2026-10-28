@@ -1,6 +1,7 @@
 // Backend de desenvolvimento (?local=1): lê os arquivos servidos pelo dev-server (/dados/ = pasta BRAINSTORM)
 // e grava só neste navegador (localStorage). Nunca escreve nos arquivos de verdade.
 import { ErroAPI } from './github.js';
+import { ehTexto } from './modelo.js';
 
 const OVERLAY = 'bs-local-overlay';
 const APAGADOS = 'bs-local-apagados'; // pastas apagadas neste navegador
@@ -55,7 +56,6 @@ export class LocalBackend {
   async load() {
     await espera(this.atraso);
     const todos = await this.listar('ideias/');
-    const ehTexto = p => /(^|\/)(ideia|direcao)\.md$/.test(p) || p === 'ideias/mapa-geral.json';
     const files = new Map();
     await Promise.all(todos.filter(p => ehTexto(p) && !this.apagado(p)).map(async p => {
       const r = await fetch(this.base + caminho(p), { cache: 'no-store' });

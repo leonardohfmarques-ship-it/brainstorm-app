@@ -97,8 +97,9 @@ export function titulos(body) {
   });
   return out;
 }
-// ordem das seções de cima (## ...) num arquivo de ideia
-const ORDEM = ['bruto', 'lapidado', 'edicao', 'plano'];
+// ordem das seções de cima (## ...): ideia.md (Bruto → Lapidado → Edição → Plano) e item.md da Edição
+// (Contexto → Perguntas → ... → Versão final → Plano). Uma lista só serve aos dois, porque não se misturam.
+const ORDEM = ['bruto', 'lapidado', 'edicao', 'contexto', 'perguntas', 'variaveis', 'estrutura', 'riscos', 'referencias', 'comparar', 'versao final', 'plano'];
 const norm = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 
 // path = ['Bruto', 'Anotações'] → { h, level, start, end } (linhas do corpo, end exclusivo)
@@ -106,7 +107,10 @@ export function acharSecao(doc, path) {
   const hs = titulos(doc.body);
   let lo = 0, hi = doc.body.length, lvl = 0, found = null;
   for (const name of path) {
-    const h = hs.find(x => x.i >= lo && x.i < hi && x.level > lvl && norm(x.name) === norm(name));
+    // a seção de cima é sempre "##" e cada passo é filha direta: um "##### Plano" copiado dentro de outra seção
+    // (no Contexto de um item, por exemplo) nunca é confundido com a seção "## Plano"
+    const nivel = lvl ? lvl + 1 : 2;
+    const h = hs.find(x => x.i >= lo && x.i < hi && x.level === nivel && norm(x.name) === norm(name));
     if (!h) return null;
     const next = hs.find(x => x.i > h.i && x.level <= h.level);
     const end = next && next.i < hi ? next.i : hi;
@@ -162,11 +166,37 @@ export function gravarSecao(doc, path, content) {
 
 /* ---------------- remendos (o que o app grava) ---------------- */
 // patch = { fm: { chave: valor | null }, sec: { 'Bruto/Anotações': texto } }
+// Nome de seção com "/" (uma pergunta, por exemplo) vai na chave feita por secao(...), que separa com \u001f.
+const SEP = '\u001f';
+export const secao = (...partes) => partes.join(SEP);
+const partesDe = k => k.includes(SEP) ? k.split(SEP) : k.split('/');
 export function aplicar(text, patch) {
   const doc = abrir(text);
   if (patch && patch.fm) for (const k of Object.keys(patch.fm)) gravarCampo(doc, k, patch.fm[k]);
-  if (patch && patch.sec) for (const k of Object.keys(patch.sec)) gravarSecao(doc, k.split('/'), patch.sec[k]);
+  if (patch && patch.sec) for (const k of Object.keys(patch.sec)) gravarSecao(doc, partesDe(k), patch.sec[k]);
   return fechar(doc);
+}
+
+/* ---------------- títulos dentro de um texto ---------------- */
+// títulos que fechariam a seção no arquivo descem para "min" (## dentro do Lapidado vira ###)
+export function rebaixar(text, min) {
+  let fence = false;
+  return String(text).split('\n').map(l => {
+    if (FENCE.test(l)) { fence = !fence; return l; }
+    if (fence) return l;
+    const m = l.match(/^(#{1,6})([ \t]+.*)$/);
+    return m && m[1].length < min ? '#'.repeat(min) + m[2] : l;
+  }).join('\n');
+}
+// desce todos os títulos juntos (mantém a hierarquia) até o menor ficar em "min"; nunca passa de ######
+export function descer(text, min) {
+  const linhas = String(text == null ? '' : text).split('\n');
+  let fence = false, menor = 7;
+  const eh = linhas.map(l => { if (FENCE.test(l)) { fence = !fence; return 0; } if (fence) return 0; const m = l.match(/^(#{1,6})[ \t]+/); return m ? m[1].length : 0; });
+  eh.forEach(n => { if (n && n < menor) menor = n; });
+  const d = menor < min ? min - menor : 0;
+  if (!d) return linhas.join('\n');
+  return linhas.map((l, i) => eh[i] ? '#'.repeat(Math.min(6, eh[i] + d)) + l.slice(eh[i]) : l).join('\n');
 }
 
 export function juntar(a, b) {

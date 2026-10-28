@@ -1,6 +1,8 @@
 // Backend de produção: lê e grava no repositório privado pela API do GitHub.
 // A chave (token) só vai para api.github.com, nunca para outro lugar, e nunca aparece em log.
 
+import { ehTexto } from './modelo.js';
+
 const API = 'https://api.github.com';
 
 export class ErroAPI extends Error {
@@ -108,7 +110,6 @@ export class GitHubBackend {
     const tree = await this.api(`${this.raiz}/git/trees/${encodeURIComponent(this.branch)}?recursive=1`);
     const itens = (tree.tree || []).filter(t => t.type === 'blob' && t.path.startsWith('ideias/'));
     this.indice = new Map(itens.map(t => [t.path, { sha: t.sha, size: t.size }]));
-    const ehTexto = p => /(^|\/)(ideia|direcao)\.md$/.test(p) || p === 'ideias/mapa-geral.json';
     const textos = itens.filter(t => ehTexto(t.path));
     const cache = lerCache(), usados = {};
     const files = new Map();

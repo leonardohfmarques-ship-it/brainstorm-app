@@ -1,6 +1,8 @@
 // Monta a árvore de ideias e direções a partir dos arquivos de ideias/ (contrato em docs/FORMATO.md).
 import { abrir, lerCampos, lerSecao } from './formato.js';
 import { lerTarefas } from './plano.js';
+import { lerItem } from './item.js';
+import { noPorRel } from './arvore.js';
 
 export const AREAS = [
   { id: 'youtube', nome: 'YouTube', c: '#E2231A', b: 'Y' },
@@ -13,6 +15,9 @@ export const AREA = Object.fromEntries(AREAS.map(a => [a.id, a]));
 const RE_IDEIA = /^ideias\/([^/]+)\/([^/]+)\/ideia\.md$/;
 const RE_DIR = /^(.+)\/direcoes\/([^/]+)\/direcao\.md$/;
 const RE_ANEXO = /^(.+?)\/anexos\/(.+)$/;
+const RE_ITEM = /^(ideias\/[^/]+\/[^/]+)\/decididas\/([^/]+)\/item\.md$/;
+// arquivos de texto que o app lê (o resto de ideias/ são anexos)
+export const ehTexto = p => /(^|\/)(ideia|direcao)\.md$/.test(p) || RE_ITEM.test(p) || p === 'ideias/mapa-geral.json';
 
 // estados de uma ideia: ativa (Brainstorm), guardada (gaveta), edicao, kanban, feita. O resto vira ativa.
 export const ESTADOS = ['ativa', 'guardada', 'edicao', 'kanban', 'feita'];
@@ -48,7 +53,7 @@ function lerNo(path, text) {
     pos: par(f.pos),
     anotacoes: lerSecao(doc, ['Bruto', 'Anotações']) || '',
     lapidado: lerSecao(doc, ['Lapidado']) || '',
-    direcoes: [], anexos: []
+    direcoes: [], anexos: [], itens: []
   };
 }
 
@@ -67,6 +72,7 @@ export function construir(files, anexos = []) {
         kind: 'ideia', key: m[1] + '/' + m[2], slug: m[2], area, pasta: m[1],
         estado: lerEstado(n.campos.estado),
         criada: String(n.campos.criada || '').trim(), codigo: String(n.campos.codigo || '').trim(),
+        falaMd: lerSecao(doc, ['Bruto', 'Fala']) || '',
         fala: separarFala(lerSecao(doc, ['Bruto', 'Fala']) || ''),
         brutoAnexos: lerSecao(doc, ['Bruto', 'Anexos']) || '',
         resumo: lerSecao(doc, ['Lapidado', 'Resumo']) || '',
@@ -98,6 +104,19 @@ export function construir(files, anexos = []) {
       mae.direcoes.push(n); porBase.set(n.base, n);
     } catch (e) { erros.push(p); }
   }
+  // itens da Edição (direções decididas): ligados à ideia e à direção de onde vieram, se ela ainda existe
+  const itens = [];
+  for (const p of paths) {
+    const m = p.match(RE_ITEM); if (!m) continue;
+    const ideia = porBase.get(m[1]);
+    if (!ideia || ideia.kind !== 'ideia') { erros.push(p); continue; }
+    try {
+      const it = lerItem(p, files.get(p).text);
+      Object.assign(it, { slug: m[2], key: ideia.key + '/decididas/' + m[2], ideia, area: ideia.area, codigo: ideia.codigo });
+      if (!it.titulo) it.titulo = m[2].replace(/-/g, ' ');
+      itens.push(it); ideia.itens.push(it);
+    } catch (e) { erros.push(p); }
+  }
   for (const a of anexos) {
     const m = a.path.match(RE_ANEXO); if (!m) continue;
     // a pasta anexos mais funda que casa (o regex pega a primeira; procura a dona exata)
@@ -110,9 +129,12 @@ export function construir(files, anexos = []) {
     n.direcoes.forEach(ordenar);
   };
   ideias.forEach(ordenar);
+  // depois de ordenar: cada ponta sabe dos itens que nasceram dela
+  for (const it of itens) { const n = it.rel == null ? null : noPorRel(it.ideia, it.rel); it.no = n; if (n && n !== it.ideia) n.itens.push(it); }
+  itens.sort((a, b) => (a.criado || '').localeCompare(b.criado || '') || a.key.localeCompare(b.key));
   ideias.sort((a, b) => (a.criada || '').localeCompare(b.criada || '') || a.slug.localeCompare(b.slug));
-  return { ideias, erros, porBase };
+  return { ideias, itens, erros, porBase };
 }
 
-// algum pedido aberto nesta ideia ou dentro dela?
+// algum pedido aberto nesta ideia ou dentro dela? (os pedidos das ferramentas da Edição contam à parte)
 export function temPedido(n) { return !!n.pedido || n.direcoes.some(temPedido); }

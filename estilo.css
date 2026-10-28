@@ -572,3 +572,129 @@ body.is-arrastando,body.is-arrastando *{cursor:grabbing!important;user-select:no
   .et-in{padding:20px 16px 32px}
   .date{display:none}
 }
+
+/* ---------- Edição por item: contexto herdado e as ferramentas (cartões) ---------- */
+.et-in--it{max-width:1120px}
+.aviso--antiga{border-style:solid;max-width:none}
+.aviso--antiga b{font-weight:800}
+/* marca discreta no mapa: a ponta decidida */
+.tag-ed{display:inline-block;padding:1px 6px 2px;border:1.5px solid var(--c,var(--ink));border-radius:999px;background:var(--paper);color:var(--ink);font:500 10px/1.2 var(--mono);letter-spacing:.06em;text-transform:uppercase;cursor:pointer;vertical-align:1px;white-space:nowrap}
+.tag-ed:hover{background:var(--c,var(--ink));color:#fff}
+.st--fundo .tag-ed{font-size:9.5px;padding:0 5px 1px}
+
+/* linha das ferramentas: uma estação por ferramenta */
+.fx-linha{position:relative;display:flex;justify-content:space-between;gap:4px;margin:4px 0 22px;padding:0 4px}
+.fx-linha::before{content:"";position:absolute;left:18px;right:18px;top:11px;height:4px;border-radius:2px;background:var(--c)}
+.fx-est{position:relative;display:flex;flex-direction:column;align-items:center;gap:7px;border:0;background:none;padding:0 2px;cursor:pointer;min-width:0;flex:1}
+.fx-est .d{width:26px;height:26px;border-radius:50%;border:5px solid var(--c);background:var(--paper);box-sizing:border-box;transition:transform .12s var(--out)}
+.fx-est--pronto .d{background:var(--c)}
+.fx-est--obras .d{border-style:dashed;animation:girar 3s linear infinite}
+.fx-est .t{font:500 10.5px/1.15 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--gray);text-align:center;max-width:11ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fx-est:hover .d{transform:scale(1.15)}
+.fx-est:hover .t,.fx-est--pronto .t{color:var(--ink)}
+@keyframes girar{to{transform:rotate(360deg)}}
+
+/* seções da página e a grade dos cartões (nunca um em cima do outro: grade com duas colunas que crescem para baixo) */
+.fx-sec{display:flex;align-items:center;gap:10px;margin:26px 0 12px}
+.fx-sec span{width:22px;height:22px;border-radius:50%;background:var(--ink);color:var(--bg);display:inline-grid;place-items:center;font:500 11px/1 var(--mono)}
+.fx-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;align-items:start}
+
+/* cartão de ferramenta */
+.fx{border:2px solid var(--ink);border-radius:10px;background:var(--paper);min-width:0;scroll-margin-top:16px}
+.fx-h{display:flex;align-items:center;gap:10px;padding:14px 14px 11px 16px;border-bottom:2px solid var(--ink);box-shadow:inset 0 6px 0 var(--c);flex-wrap:wrap;row-gap:8px}
+.fx--vazio .fx-h{box-shadow:inset 0 6px 0 var(--faint)}
+.fx-d{width:16px;height:16px;border-radius:50%;border:4px solid var(--c);background:var(--paper);flex:none;box-sizing:border-box}
+.fx--pronto .fx-d{background:var(--c)}
+.fx--vazio .fx-d{border-color:rgba(17,17,17,.35);border-style:dashed}
+.fx--obras .fx-d{border-style:dashed;animation:girar 3s linear infinite}
+.fx-t{font:800 16px/1 var(--sans);letter-spacing:.06em;text-transform:uppercase}
+.fx-st{font:400 11px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--gray)}
+.fx--obras .fx-st{color:var(--ink)}
+.fx-h .sp{flex:1}
+.fx-h .btn{gap:6px}
+.fx-b{padding:16px 16px 18px}
+.fx-b > :last-child{margin-bottom:0}
+.fx-wait{margin:0 0 14px;--c:var(--ink)}
+.fx-wb{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+details.fx > summary,details.ctx-n > summary{list-style:none;cursor:pointer}
+details.fx > summary::-webkit-details-marker,details.ctx-n > summary::-webkit-details-marker{display:none}
+details.fx:not([open]) > .fx-h{border-bottom:0}
+.fx-dobra::after{content:"abrir"}
+details[open] > summary .fx-dobra::after{content:"fechar"}
+.fx .empty{color:var(--gray)}
+.fx--obras .campo-vazio,.fx--obras .fx-b > .empty{display:none}
+.ctx-c .md h5{font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:#4A4430;margin:20px 0 8px;padding-top:10px;border-top:1.5px solid rgba(17,17,17,.2)}
+.ctx-c .md > h5:first-child{border-top:0;padding-top:0;margin-top:0}
+.ctx-c .md h6{font:800 15px/1.2 var(--sans);margin:14px 0 6px}
+
+/* contexto herdado: o caminho como linha de metrô (sempre à vista) */
+.fx-ctx{margin:0 0 4px;background:var(--bg)}
+.fx-ctx > summary{align-items:flex-start}
+.ctx-linha{flex-basis:100%;display:flex;flex-wrap:wrap;align-items:flex-start;gap:8px 0;list-style:none;margin:6px 0 2px;padding:0}
+.ctx-linha li{position:relative;display:grid;grid-template-columns:auto;justify-items:start;gap:3px;padding:0 18px 0 0;max-width:26ch}
+.ctx-linha li:not(:last-child)::after{content:"";position:absolute;left:12px;right:0;top:6px;height:4px;background:var(--c);border-radius:2px}
+.ctx-linha .d{position:relative;z-index:1;width:16px;height:16px;border-radius:50%;border:4px solid var(--c);background:var(--paper);box-sizing:border-box}
+.ctx-linha .is-ponta .d{width:20px;height:20px;margin-top:-2px;background:var(--c);border-color:var(--ink)}
+.ctx-linha .r{font:400 10px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--gray)}
+.ctx-linha .t{font:500 14px/1.2 var(--sans);text-wrap:balance}
+.ctx-linha .is-ponta .t{font-weight:800}
+.ctx-b{display:flex;flex-direction:column;gap:10px;border-top:2px solid var(--ink)}
+.ctx-n{border:2px solid var(--ink);border-radius:8px;background:var(--paper)}
+.ctx-n > summary{display:flex;align-items:baseline;gap:10px;padding:10px 14px}
+.ctx-n > summary b{font:800 16px/1.2 var(--sans);flex:1}
+.ctx-n > summary .r{font:400 10.5px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--gray);white-space:nowrap}
+.ctx-n.is-ponta{box-shadow:inset 6px 0 0 var(--c)}
+.ctx-c{padding:2px 14px 14px;max-height:420px;overflow:auto}
+.ctx-c .md{font-size:15px}
+.ctx-fala{font-size:17px!important}
+.ctx-lap{background:var(--lap);border-radius:6px;padding:10px 12px;margin-top:6px}
+.ctx-lap .lab{color:#4A4430}
+
+/* perguntas: cada uma com o campo da resposta */
+.pergs{list-style:none;counter-reset:pg;margin:0;padding:0;display:flex;flex-direction:column;gap:14px}
+.pergs li{counter-increment:pg;display:grid;grid-template-columns:28px minmax(0,1fr);gap:6px 6px}
+.pergs li::before{content:counter(pg);grid-row:1 / span 2;width:22px;height:22px;border-radius:50%;border:3px solid var(--c);display:grid;place-items:center;font:500 10px/1 var(--mono);box-sizing:border-box;margin-top:1px}
+.pg-q{font:800 15.5px/1.3 var(--sans);text-wrap:pretty}
+textarea.pg-r{min-height:48px;font-size:15px;padding:8px 10px;field-sizing:content;max-height:280px}
+
+/* variáveis: campos dele, sugestão do Claude embaixo */
+.vars{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 14px;margin:0 0 12px}
+.var{display:flex;flex-direction:column;gap:5px;min-width:0}
+.var label{font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--gray)}
+.var input,.ref-add input{width:100%;height:38px;border:2px solid var(--ink);border-radius:8px;background:var(--paper);padding:0 10px;font:500 15px/1 var(--sans);color:var(--ink);min-width:0}
+.var input::placeholder,.ref-add input::placeholder{color:#8A8A8A;font-size:13px}
+.var input:focus-visible,.ref-add input:focus-visible{box-shadow:0 0 0 3px var(--lap)}
+.var-sug{display:flex;gap:6px;align-items:baseline;text-align:left;border:0;background:none;padding:0;cursor:pointer;font:400 12px/1.35 var(--mono);color:#4A4430}
+.var-sug span{flex:none;background:var(--lap);padding:1px 5px;border-radius:3px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink)}
+.var-sug:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+.var-x{margin:0 0 10px;font-size:14px}
+.fx .nota{display:block;font:400 12px/1.4 var(--mono);color:var(--gray)}
+.ref-add{margin:0 0 12px}
+
+/* estrutura: os blocos como estações numa linha */
+.est-l{position:relative;list-style:none;margin:0;padding:0 0 0 30px}
+.est-l::before{content:"";position:absolute;left:9px;top:8px;bottom:8px;width:4px;border-radius:2px;background:var(--c)}
+.est-l li{position:relative;margin:0 0 14px}
+.est-l li:last-child{margin-bottom:0}
+.est-l li::before{content:"";position:absolute;left:-28px;top:2px;width:18px;height:18px;border-radius:50%;border:4px solid var(--c);background:var(--paper);box-sizing:border-box}
+.est-l b{display:block;font:800 16px/1.25 var(--sans);margin:0 0 3px}
+.est-l .md{font-size:15px}
+
+/* comparar: as irmãs lado a lado */
+.cmp{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+.cmp-c{border:2px solid var(--ink);border-radius:8px;padding:10px 12px;background:var(--paper)}
+.cmp-c b{display:block;font:800 15px/1.2 var(--sans);margin:0 0 6px}
+.cmp-c .md{font-size:14px}
+.cmp-c.is-resumo{grid-column:1 / -1;background:var(--lap)}
+.fx .campo-v{margin:-6px -8px;padding:6px 8px}
+.fx.plano .plano-l{font-size:15.5px}
+
+@media (max-width:1180px){
+  .fx-grid{grid-template-columns:minmax(0,1fr)}
+  .fx-est .t{display:none}
+}
+@media (max-width:760px){
+  .vars{grid-template-columns:minmax(0,1fr)}
+  .fx-linha{margin-bottom:16px}
+}
+@media (prefers-reduced-motion:reduce){.fx-est--obras .d,.fx--obras .fx-d{animation:none!important}}
