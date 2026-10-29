@@ -582,21 +582,51 @@ body.is-arrastando,body.is-arrastando *{cursor:grabbing!important;user-select:no
 .tag-ed:hover{background:var(--c,var(--ink));color:#fff}
 .st--fundo .tag-ed{font-size:9.5px;padding:0 5px 1px}
 
-/* linha das ferramentas: uma estação por ferramenta */
-.fx-linha{position:relative;display:flex;justify-content:space-between;gap:4px;margin:4px 0 22px;padding:0 4px}
-.fx-linha::before{content:"";position:absolute;left:18px;right:18px;top:11px;height:4px;border-radius:2px;background:var(--c)}
-.fx-est{position:relative;display:flex;flex-direction:column;align-items:center;gap:7px;border:0;background:none;padding:0 2px;cursor:pointer;min-width:0;flex:1}
-.fx-est .d{width:26px;height:26px;border-radius:50%;border:5px solid var(--c);background:var(--paper);box-sizing:border-box;transition:transform .12s var(--out)}
-.fx-est--pronto .d{background:var(--c)}
-.fx-est--obras .d{border-style:dashed;animation:girar 3s linear infinite}
-.fx-est .t{font:500 10.5px/1.15 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--gray);text-align:center;max-width:11ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.fx-est:hover .d{transform:scale(1.15)}
-.fx-est:hover .t,.fx-est--pronto .t{color:var(--ink)}
+/* a linha dos passos (era a linha das ferramentas): Aprofundar → Montar → Fechar. O passo aberto tem a estação
+   cheia de tinta (como a etapa do topo); os outros mostram o estado dos cartões: cheia = pronto, meia = em parte,
+   tracejada = Claude escrevendo. O trilho depois de um passo pronto é cheio; antes disso, tracejado. */
+.rota{margin:20px 0 18px;scroll-margin-top:18px}
+.rota ol{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 16px;list-style:none;margin:0;padding:0}
+.rota-p{position:relative;min-width:0}
+.rota-p:not(:last-child)::after{content:"";position:absolute;left:30px;right:-16px;top:13px;height:4px;background:linear-gradient(90deg,var(--c) 55%,transparent 0) 0 0/14px 4px repeat-x}
+.rota-p--pronto:not(:last-child)::after{background:var(--c)}
+.rota-b{position:relative;z-index:1;display:grid;grid-template-columns:minmax(0,1fr);justify-items:start;gap:8px;width:100%;text-align:left;border:0;background:none;padding:0 8px 6px 0;cursor:pointer;color:var(--ink);border-radius:8px}
+.rota-b .d{width:30px;height:30px;border-radius:50%;border:5px solid var(--c);background:var(--paper);box-sizing:border-box;transition:transform .12s var(--out)}
+.rota-p--pronto .d{background:var(--c)}
+.rota-p--meio .d{background:linear-gradient(90deg,var(--c) 50%,var(--paper) 0)}
+.rota-p--obras .d{border-style:dashed;animation:girar 3s linear infinite}
+.rota-p.is-aberto .d{background:var(--ink);border-color:var(--ink);box-shadow:0 0 0 4px var(--bg),0 0 0 6px var(--c)}
+.rota-b .n{display:flex;align-items:center;gap:8px;font:800 17px/1 var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--gray)}
+.rota-b .k{width:20px;height:20px;flex:none;border-radius:50%;background:var(--gray);color:var(--bg);display:inline-grid;place-items:center;font:500 11px/1 var(--mono);letter-spacing:0}
+.rota-b .s{font:400 11.5px/1.4 var(--mono);color:var(--gray);text-wrap:pretty}
+.rota-p.is-aberto .n{color:var(--ink)}
+.rota-p.is-aberto .k{background:var(--ink)}
+.rota-p.is-aberto .s{color:var(--ink)}
+.rota-p.is-aberto .rota-b{cursor:default}
+.rota-p:not(.is-aberto) .rota-b:hover .n{color:var(--ink)}
+.rota-p:not(.is-aberto) .rota-b:hover .d{transform:scale(1.12)}
+.rota-b:focus-visible{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--ink)}
 @keyframes girar{to{transform:rotate(360deg)}}
 
-/* seções da página e a grade dos cartões (nunca um em cima do outro: grade com duas colunas que crescem para baixo) */
-.fx-sec{display:flex;align-items:center;gap:10px;margin:26px 0 12px}
-.fx-sec span{width:22px;height:22px;border-radius:50%;background:var(--ink);color:var(--bg);display:inline-grid;place-items:center;font:500 11px/1 var(--mono)}
+/* o passo aberto: os cartões dele e, no fim, o botão para o próximo */
+.passo-fim{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;margin:22px 0 0;padding:16px 0 0;border-top:2px solid var(--ink)}
+.passo-fim .sp{flex:1}
+.passo-fim .nota{font:400 12px/1.4 var(--mono);color:var(--gray);max-width:44ch;text-align:right}
+.passo-fim .btn--solid{height:44px;padding:0 20px;font-size:15px;gap:10px}
+.passo-fim .btn--ghost{padding:0 10px 0 6px}
+
+/* Extras: Referências e Comparar, fora do caminho (uma linha tracejada, recolhida, em qualquer passo) */
+.extras{margin:30px 0 0;border:2px dashed rgba(17,17,17,.35);border-radius:10px}
+.extras[open]{border-color:var(--ink)}
+.extras > summary{list-style:none;cursor:pointer;display:flex;align-items:baseline;gap:6px 12px;flex-wrap:wrap;padding:11px 16px 10px;border-radius:8px}
+.extras > summary::-webkit-details-marker{display:none}
+.extras > summary:hover{background:var(--faint)}
+.extras .ex-t{font:800 14px/1 var(--sans);letter-spacing:.06em;text-transform:uppercase}
+.extras .ex-s{font:400 11.5px/1.4 var(--mono);color:var(--gray)}
+.extras .sp{flex:1}
+.extras > .fx-grid{padding:4px 14px 16px}
+
+/* a grade dos cartões (nunca um em cima do outro: grade com duas colunas que crescem para baixo) */
 .fx-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;align-items:start}
 
 /* cartão de ferramenta */
@@ -695,16 +725,20 @@ textarea.pg-rumo-t{min-height:64px;font-size:15.5px;padding:8px 10px;field-sizin
 .pg-desc li{display:flex;gap:10px;align-items:baseline;justify-content:space-between;font:500 14px/1.35 var(--sans);color:var(--gray);text-decoration:line-through;text-decoration-color:rgba(17,17,17,.3)}
 .pg-desc li .mini{flex:none;text-decoration:underline}
 
-/* variáveis: campos dele, sugestão do Claude embaixo */
+/* variáveis: um campo só, com o valor que vale; o do Claude (ele não escreveu) leva a marca "do Claude" e o fundo
+   do lapidado, até ele escrever por cima */
 .vars{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 14px;margin:0 0 12px}
 .var{display:flex;flex-direction:column;gap:5px;min-width:0}
-.var label{font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--gray)}
-.var input,.ref-add input{width:100%;height:38px;border:2px solid var(--ink);border-radius:8px;background:var(--paper);padding:0 10px;font:500 15px/1 var(--sans);color:var(--ink);min-width:0}
-.var input::placeholder,.ref-add input::placeholder{color:#8A8A8A;font-size:13px}
-.var input:focus-visible,.ref-add input:focus-visible{box-shadow:0 0 0 3px var(--lap)}
-.var-sug{display:flex;gap:6px;align-items:baseline;text-align:left;border:0;background:none;padding:0;cursor:pointer;font:400 12px/1.35 var(--mono);color:#4A4430}
-.var-sug span{flex:none;background:var(--lap);padding:1px 5px;border-radius:3px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink)}
-.var-sug:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+.var label{display:flex;align-items:center;gap:7px;min-height:15px;font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--gray)}
+.var-de{display:none;background:var(--lap);padding:2px 5px 1px;border-radius:3px;font:500 9.5px/1.2 var(--mono);letter-spacing:.06em;color:#4A4430}
+.var.is-claude .var-de{display:inline-block}
+textarea.var-in{display:block;width:100%;min-height:38px;border:2px solid var(--ink);border-radius:8px;background:var(--paper);padding:7px 10px;font:500 15px/1.3 var(--sans);color:var(--ink);min-width:0;resize:none;overflow:hidden;field-sizing:content}
+.var.is-claude textarea.var-in{background:color-mix(in srgb,var(--lap) 45%,var(--paper))}
+.var-in::placeholder{color:#8A8A8A}
+.var-in:focus-visible{box-shadow:0 0 0 3px var(--lap)}
+.ref-add input{width:100%;height:38px;border:2px solid var(--ink);border-radius:8px;background:var(--paper);padding:0 10px;font:500 15px/1 var(--sans);color:var(--ink);min-width:0}
+.ref-add input::placeholder{color:#8A8A8A;font-size:13px}
+.ref-add input:focus-visible{box-shadow:0 0 0 3px var(--lap)}
 .var-x{margin:0 0 10px;font-size:14px}
 .fx .nota{display:block;font:400 12px/1.4 var(--mono);color:var(--gray)}
 .ref-add{margin:0 0 12px}
@@ -729,10 +763,21 @@ textarea.pg-rumo-t{min-height:64px;font-size:15.5px;padding:8px 10px;field-sizin
 
 @media (max-width:1180px){
   .fx-grid{grid-template-columns:minmax(0,1fr)}
-  .fx-est .t{display:none}
 }
+/* no celular a linha dos passos fica em pé: uma estação por linha, o trilho descendo */
 @media (max-width:760px){
   .vars{grid-template-columns:minmax(0,1fr)}
-  .fx-linha{margin-bottom:16px}
+  .rota{margin:16px 0 14px}
+  .rota ol{grid-template-columns:minmax(0,1fr);gap:0}
+  .rota-p:not(:last-child)::after{left:13px;right:auto;top:30px;bottom:0;width:4px;height:auto;background:linear-gradient(var(--c) 55%,transparent 0) 0 0/4px 14px repeat-y}
+  .rota-p--pronto:not(:last-child)::after{background:var(--c)}
+  .rota-b{grid-template-columns:30px minmax(0,1fr);column-gap:12px;row-gap:5px;align-items:center;padding:0 0 14px}
+  .rota-b .d{grid-row:1 / span 2;align-self:start}
+  .rota-b .n{font-size:15px}
+  /* no celular: o botão do próximo passo ocupa a linha, a nota embaixo dele e o "Voltar" por último */
+  .passo-fim .sp{display:none}
+  .passo-fim .btn--solid{order:1;width:100%;justify-content:center}
+  .passo-fim .nota{order:2;text-align:left;flex-basis:100%;max-width:none}
+  .passo-fim .btn--ghost{order:3}
 }
-@media (prefers-reduced-motion:reduce){.fx-est--obras .d,.fx--obras .fx-d{animation:none!important}}
+@media (prefers-reduced-motion:reduce){.rota-p--obras .d,.fx--obras .fx-d{animation:none!important}}

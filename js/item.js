@@ -24,6 +24,15 @@ export const PEDIDOS = FERRAMENTAS.filter(f => f.pede).map(f => f.id).concat('re
 export const DEPENDEM = ['estrutura', 'riscos', 'comparar', 'versao', 'plano'];
 export const VARIAVEIS = ['Formato', 'Canal', 'Prazo', 'Ritmo', 'Custo', 'Material'];
 export const ESTADOS_ITEM = ['edicao', 'kanban', 'feita'];
+// os três passos da página do item, um aberto por vez (o caminho principal). Referências e Comparar ficam à parte
+export const PASSOS = [
+  { id: 'aprofundar', nome: 'Aprofundar', cartoes: ['perguntas', 'variaveis'] },
+  { id: 'montar', nome: 'Montar', cartoes: ['estrutura', 'riscos'] },
+  { id: 'fechar', nome: 'Fechar', cartoes: ['versao', 'plano'] }
+];
+export const PASSO = Object.fromEntries(PASSOS.map(p => [p.id, p]));
+export const EXTRAS = ['referencias', 'comparar'];
+export const PRINCIPAIS = PASSOS.flatMap(p => p.cartoes);
 // subseções de Variáveis: as dele e as do Claude ficam separadas, para um nunca apagar o outro
 export const SEC_DECIDIDAS = secao('Variáveis', 'Decididas');
 export const SEC_SUGESTOES = secao('Variáveis', 'Sugestões do Claude');
@@ -102,6 +111,16 @@ export function escreverVariaveis(valores, extras = []) {
   const linhas = VARIAVEIS.map(k => `- ${k}: ${String(valores[k] || '').replace(/\s+/g, ' ').trim()}`.trimEnd());
   return linhas.concat(extras.filter(l => l.trim())).join('\n');
 }
+// o valor que vale de cada variável: o dele, se ele escreveu; senão a sugestão do Claude (aceita sem ele confirmar).
+// Só se calcula ao ler: nada do Claude é gravado em "Decididas". O sistema/ferramentas.py faz a mesma conta (valem).
+export function valem(dele = {}, sugestoes = {}) {
+  const out = {};
+  for (const k of VARIAVEIS) {
+    const d = String(dele[k] == null ? '' : dele[k]).trim(), s = String(sugestoes[k] == null ? '' : sugestoes[k]).trim();
+    out[k] = d ? { valor: d, de: 'dele' } : s ? { valor: s, de: 'claude' } : { valor: '', de: '' };
+  }
+  return out;
+}
 
 /* ---------------- blocos: cada ### vira um bloco (Perguntas, Estrutura, Comparar, Contexto) ---------------- */
 export function blocos(md, nivel = 3) {
@@ -152,7 +171,8 @@ export function lerItem(path, text) {
     entendido: ler(['Perguntas', ENTENDI]) || '',
     enviadas: String(f.enviadas == null ? '' : f.enviadas), enviando: String(f.enviando == null ? '' : f.enviando),
     desatualizado: lerLista(f.desatualizado, DEPENDEM),
-    variaveis: vars.valores, varExtras: vars.extras, sugestoes: sug.valores,
+    variaveis: vars.valores, varExtras: vars.extras, sugestoes: sug.valores, valem: valem(vars.valores, sug.valores),
+    passo: lerPasso(f.passo),
     estrutura: ler(['Estrutura']) || '', riscos: ler(['Riscos']) || '', referencias: ler(['Referências']) || '',
     comparar: ler(['Comparar']) || '', versao: ler(['Versão final']) || '',
     plano: { afazer: lerTarefas(ler(['Plano', 'A fazer'])), fazendo: lerTarefas(ler(['Plano', 'Fazendo'])), feito: lerTarefas(ler(['Plano', 'Feito'])) },
@@ -174,6 +194,21 @@ export function estadoFerramenta(it, id) {
     plano: ['afazer', 'fazendo', 'feito'].some(c => it.plano[c].tarefas.length)
   }[id];
   return cheio ? 'pronto' : 'vazio';
+}
+
+/* ---------------- passo da página: "passo: montar" (sem a linha = Aprofundar) ---------------- */
+export function lerPasso(v) {
+  const p = norm(v);
+  return PASSO[p] ? p : PASSOS[0].id;
+}
+// o passo em que ele está fica no arquivo (vale no celular também); Aprofundar é o começo, sem linha
+export const remendoPasso = id => ({ fm: { passo: PASSO[id] && id !== PASSOS[0].id ? id : null } });
+// estado do passo pelos cartões dele: 'obras' (algum pedido aberto), 'pronto' (todos), 'meio' (algum) ou 'vazio'
+export function estadoPasso(it, id) {
+  const es = PASSO[id].cartoes.map(f => estadoFerramenta(it, f));
+  if (es.includes('obras')) return 'obras';
+  if (es.every(e => e === 'pronto')) return 'pronto';
+  return es.includes('pronto') ? 'meio' : 'vazio';
 }
 
 /* ---------------- decidir: o item novo, com o contexto congelado ---------------- */
