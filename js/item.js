@@ -80,14 +80,17 @@ export function marca(s) {
 }
 export const codigoResposta = (q, r) => marca(umaLinha(q) + '\n' + umaLinha(r));
 export const codigoRumo = rumo => marca('rumo\n' + umaLinha(rumo));
-export const marcaDe = it => ['rumo=' + codigoRumo(it.rumo)].concat(it.perguntas.filter(p => p.r.trim()).map(p => codigoResposta(p.q, p.r))).join(' ');
+// as descartadas (só os títulos, na ordem do arquivo): excluir ou trazer de volta também é mudança (desde 30/10)
+export const codigoFora = lista => marca('fora\n' + lista.map(umaLinha).join('\n'));
+export const marcaDe = it => ['rumo=' + codigoRumo(it.rumo), 'fora=' + codigoFora(it.descartadas)].concat(it.perguntas.filter(p => p.r.trim()).map(p => codigoResposta(p.q, p.r))).join(' ');
 export function lerMarca(v) {
-  let rumo = null; const cods = new Set();
+  let rumo = null, fora = null; const cods = new Set();
   for (const t of String(v || '').split(/\s+/)) {
     if (t.startsWith('rumo=')) rumo = t.slice(5);
+    else if (t.startsWith('fora=')) fora = t.slice(5);
     else if (/^[0-9a-f]{8}$/.test(t)) cods.add(t);
   }
-  return { rumo, cods };
+  return { rumo, fora, cods };
 }
 // "O que entendi" termina com "Em aberto: …" quando há perguntas vazias ou vagas (a Action garante): a tela mostra à parte
 export function separarAberto(md) {
@@ -99,12 +102,19 @@ export function separarAberto(md) {
 }
 // perguntas ainda sem resposta (em qualquer nível): o "Enviar respostas" avisa antes de mandar assim
 export const semResposta = it => it.perguntas.filter(p => !p.r.trim()).length;
-// o que mudou desde o último envio: respostas novas ou mudadas (as que ficaram vazias não contam) e o rumo
+// o que mudou desde o último envio: respostas novas ou mudadas, respostas enviadas que sumiram (apagada ou pergunta
+// excluída), o rumo e as descartadas (marca antiga, sem "fora=": as descartadas não contam). Mesma conta do
+// ferramentas.py (novidades/tiradas)
 export function novidades(it) {
   const m = lerMarca(it.enviadas);
-  const respostas = it.perguntas.filter(p => p.r.trim() && !m.cods.has(codigoResposta(p.q, p.r))).length;
+  const ps = it.perguntas.filter(p => p.r.trim());
+  const agora = new Set(ps.map(p => codigoResposta(p.q, p.r)));
+  const respostas = ps.filter(p => !m.cods.has(codigoResposta(p.q, p.r))).length;
+  const sumiram = [...m.cods].filter(c => !agora.has(c)).length;
+  const tiradas = Math.max(0, sumiram - respostas);   // resposta mudada conta só como nova
   const rumo = m.rumo != null ? codigoRumo(it.rumo) !== m.rumo : !!it.rumo.trim();
-  return { respostas, rumo, algo: respostas > 0 || rumo, nunca: m.rumo == null && !m.cods.size };
+  const fora = m.fora != null && codigoFora(it.descartadas) !== m.fora;
+  return { respostas, tiradas, rumo, fora, algo: respostas > 0 || sumiram > 0 || rumo || fora, nunca: m.rumo == null && !m.cods.size };
 }
 
 /* ---------------- perguntas em galho ----------------
@@ -113,6 +123,7 @@ export function novidades(it) {
    anterior com um nível a menos. Item antigo (lista solta) = todas raízes. O sistema/ferramentas.py lê igual. */
 export const SETA = '↳';
 export const PROFUNDIDADE = 3;   // raiz, filha, neta: a neta não ganha filhas
+export const ABERTAS_LIMITE = 3; // com tantas sem resposta (ou mais), "Mais perguntas" fica desligado (igual ao ferramentas.py)
 export const MAX_GALHO = 2;      // "↳ aprofundar esta" pede 1 ou 2 filhas
 export function nivelDe(titulo) {
   const m = String(titulo == null ? '' : titulo).trim().match(/^((?:↳\s*)*)(.*)$/);
@@ -221,6 +232,8 @@ export function lerItem(path, text) {
     perguntas: arvore(pergs),
     aprofundar: String(f.aprofundar == null ? '' : f.aprofundar).split(/\s+/).filter(c => /^[0-9a-f]{8}$/.test(c)),
     rumo: ler(['Perguntas', RUMO]) || '', descartadas: lerDescartadas(ler(['Perguntas', DESCARTADAS]) || ''),
+    descartes: lerDescartes(ler(['Perguntas', DESCARTADAS]) || ''),
+    minhas: String(f.minhas == null ? '' : f.minhas).split(/\s+/).filter(c => /^[0-9a-f]{8}$/.test(c)),
     entendido: ler(['Perguntas', ENTENDI]) || '',
     enviadas: String(f.enviadas == null ? '' : f.enviadas), enviando: String(f.enviando == null ? '' : f.enviando),
     desatualizado: lerLista(f.desatualizado, DEPENDEM), mantido: lerLista(f.mantido, DEPENDEM),
@@ -340,24 +353,61 @@ ${escreverVariaveis({})}
 export const remendoResposta = (h, texto) => ({ sec: { [secao('Perguntas', h)]: descer(texto, 4) } });
 
 /* ----- perguntas: o rumo dele, excluir (vira descartada), desfazer, trazer de volta, pergunta dele ----- */
-// "### Descartadas" é uma lista "- pergunta", uma por linha
-export function lerDescartadas(md) {
-  const out = [];
-  for (const ln of String(md || '').split('\n')) { const m = ln.match(/^\s*[-*+]\s+(.*\S)\s*$/); if (m) out.push(m[1]); }
-  return out;
+// "### Descartadas" é uma lista "- pergunta", uma por linha. Desde 30/10 cada uma leva a resposta dele embaixo
+// (linhas "    > texto", recuadas) e o galho que saiu junto vem logo depois, com as setas relativas ("- ↳ Filha?"):
+//   - Pergunta excluída?
+//       > resposta dele
+//   - ↳ Filha que saiu junto?
+//       > resposta da filha
+// Um "grupo" é a pergunta sem seta e as com seta logo abaixo dela. Itens antigos (só títulos) leem igual.
+const RESP_DESC = /^\s{2,}>\s?(.*)$/;
+export function lerDescartes(md) {
+  const grupos = []; let ult = null;
+  for (const ln of String(md || '').split('\n')) {
+    const m = ln.match(/^\s{0,3}[-*+]\s+(.*\S)\s*$/);
+    if (m) {
+      const { nivel, q } = nivelDe(m[1]);
+      ult = { h: tituloDe(q, nivel), q, r: [], nivel };
+      if (nivel === 1 || !grupos.length) grupos.push([ult]); else grupos[grupos.length - 1].push(ult);
+      continue;
+    }
+    const r = ln.match(RESP_DESC);
+    if (r && ult) ult.r.push(r[1]);
+  }
+  return grupos.map(g => g.map(x => Object.assign(x, { r: x.r.join('\n').trim() })));
 }
-const comDescartadas = l => l.length ? l.map(q => '- ' + umaLinha(q)).join('\n') : null; // lista vazia = some
+// só os títulos (sem setas), na ordem do arquivo: o que não volta ao prompt nem às perguntas novas
+export const lerDescartadas = md => lerDescartes(md).flat().map(x => x.q);
+export function escreverDescartes(grupos) {
+  const linhas = [];
+  for (const g of grupos) for (const x of g) {
+    linhas.push('- ' + tituloDe(umaLinha(x.q), x.nivel || 1));
+    if (String(x.r || '').trim()) for (const l of String(x.r).trim().split('\n')) linhas.push(l.trim() ? '    > ' + l : '    >');
+  }
+  return linhas.length ? linhas.join('\n') : null; // lista vazia = some
+}
+// tira dos grupos as perguntas com esses títulos (o grupo que fica vazio some; filha que fica sem a raiz sobe)
+function semDescartes(grupos, qs) {
+  const fora = q => qs.some(y => norm(y) === norm(q));
+  return grupos.map(g => {
+    const resto = g.filter(x => !fora(x.q)); if (!resto.length) return null;
+    const sobe = resto[0].nivel - 1;
+    return resto.map(x => Object.assign({}, x, { nivel: Math.max(1, x.nivel - sobe) }));
+  }).filter(Boolean);
+}
 // o texto dele, como está (só os títulos descem para dentro da seção)
 export const remendoRumo = texto => ({ sec: { [SEC_RUMO]: descer(texto, 4) } });
 // excluir leva o galho junto (as filhas nasceram da resposta dela); todas viram descartadas, para não voltarem
 export function remendoExcluir(it, q) {
   const k = it.perguntas.findIndex(p => norm(p.q) === norm(q) || norm(p.h) === norm(q));
   const ps = k >= 0 ? galhoDe(it.perguntas, k).map(j => it.perguntas[j]) : [{ h: q, q }];
-  const fora = ps.map(p => umaLinha(p.q));
-  const d = it.descartadas.filter(x => !fora.some(y => norm(y) === norm(x))).concat(fora);
+  // o galho vai inteiro, com a resposta de cada uma e os níveis relativos à que foi excluída
+  const base = ps[0].nivel || 1;
+  const grupo = ps.map(p => ({ q: umaLinha(p.q), r: p.r || '', nivel: (p.nivel || 1) - base + 1 }));
+  const d = semDescartes(it.descartes || [], grupo.map(x => x.q)).concat([grupo]);
   const sec = {};
   for (const p of ps) sec[secao('Perguntas', p.h || p.q)] = null;
-  sec[SEC_DESCARTADAS] = comDescartadas(d);
+  sec[SEC_DESCARTADAS] = escreverDescartes(d);
   return { sec };
 }
 // a seção Perguntas remontada a partir dos blocos (intro + "### título" + texto)
@@ -381,7 +431,7 @@ export function remendoVolta(text, p, k) {
   lista.splice(pos, 0, ...volta.map(v => ({ titulo: v.titulo, texto: v.texto })));
   return montarPerguntas(b.intro, lista.map(x => {
     if (norm(x.titulo) !== norm(DESCARTADAS)) return x;
-    const d = comDescartadas(lerDescartadas(x.texto).filter(y => !volta.some(v => norm(v.q) === norm(y))));
+    const d = escreverDescartes(semDescartes(lerDescartes(x.texto), volta.map(v => v.q)));
     return d ? { titulo: x.titulo, texto: d } : {};
   }));
 }
@@ -417,19 +467,28 @@ export function exemploAprofundar(text, it) {
   }
   return { fm: { pedido: comPedido(it.pedidos, 'aprofundar', false), aprofundar: null }, sec };
 }
-// tirar das descartadas: a pergunta volta sem resposta, no fim da lista
-export function remendoTrazer(it, q) {
-  const sec = it.perguntas.some(p => norm(p.q) === norm(q)) ? {} : { [secao('Perguntas', q)]: '' };
-  sec[SEC_DESCARTADAS] = comDescartadas(it.descartadas.filter(x => norm(x) !== norm(q)));
-  return { sec };
+// tirar das descartadas: o grupo k volta inteiro, como estava (pergunta, resposta e o galho que saiu junto), no fim
+// da lista (antes das Descartadas). A que já existe de novo nas perguntas não volta duplicada. "text" = o arquivo de agora
+export function remendoTrazer(text, k) {
+  const b = blocos(lerSecao(abrir(text), ['Perguntas']) || '');
+  const dj = b.blocos.findIndex(x => norm(x.titulo) === norm(DESCARTADAS)); if (dj < 0) return null;
+  const grupos = lerDescartes(b.blocos[dj].texto), g = grupos[k]; if (!g) return null;
+  const ja = arvore(b.blocos.filter(x => !reservada(x.titulo))).map(p => p.q);
+  const volta = g.filter(x => !ja.some(q => norm(q) === norm(x.q)));
+  const lista = b.blocos.slice();
+  const resto = escreverDescartes(grupos.filter((_, j) => j !== k));
+  lista.splice(dj, 1, ...volta.map(x => ({ titulo: tituloDe(x.q, x.nivel), texto: x.r })), ...(resto ? [{ titulo: b.blocos[dj].titulo, texto: resto }] : []));
+  return montarPerguntas(b.intro, lista);
 }
 // pergunta dele, já com a resposta; devolve null se o nome não serve (vazio, repetido ou reservado)
 export function remendoNova(it, q, r) {
   q = umaLinha(q).replace(/#+$/, '').trim();
   if (!q || reservada(q) || it.perguntas.some(p => norm(p.q) === norm(q))) return null;
   const sec = { [secao('Perguntas', q)]: descer(String(r || '').trim(), 4) };
-  if (it.descartadas.some(x => norm(x) === norm(q))) sec[SEC_DESCARTADAS] = comDescartadas(it.descartadas.filter(x => norm(x) !== norm(q)));
-  return { sec };
+  if (it.descartadas.some(x => norm(x) === norm(q))) sec[SEC_DESCARTADAS] = escreverDescartes(semDescartes(it.descartes, [q]));
+  // as perguntas dele ficam marcadas: o "Mais perguntas" não as aprofunda sozinho (só o "↳ aprofundar esta")
+  const minhas = it.minhas.filter(c => c !== codigoPergunta(q)).concat(codigoPergunta(q));
+  return { sec, fm: { minhas: minhas.join(' ') } };
 }
 export const remendoVariaveis = (valores, extras) => ({ sec: { [SEC_DECIDIDAS]: escreverVariaveis(valores, extras) } });
 

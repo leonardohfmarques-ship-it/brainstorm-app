@@ -1096,7 +1096,8 @@ const etapaEl = $('#etapa');
 const etapas = criarEtapas({
   UI, saveUI, store: () => store, backend: () => backend, esc, ICON, toast, linkar, fmtData, fmtDataBR, rebaixar, plural, areaNome,
   irPara: (e, k) => irPara(e, k), mudarEstado: (i, e) => mudarEstado(i, e), apagarDirecao: d => apagarDirecao(d), renderNav: () => renderNav(),
-  apagarItem: it => apagarItem(it), verNoMapa: it => verNoMapa(it), converterAntiga: i => converterAntiga(i), local: () => LOCAL
+  apagarItem: it => apagarItem(it), verNoMapa: it => verNoMapa(it), converterAntiga: i => converterAntiga(i), local: () => LOCAL,
+  get DESFAZER_MS() { return DESFAZER_MS; }
 });
 function renderNav() {
   if (!store || !store.rev) { document.querySelectorAll('.et').forEach(b => { b.classList.toggle('is-on', b.dataset.etapa === UI.etapa); b.querySelector('.et-c').textContent = ''; }); return; }
@@ -1159,7 +1160,7 @@ function mudarEstado(idea, estado) {
 }
 
 /* ---------------- apagar direção: some na hora, "Desfazer" por alguns segundos, depois vai para o GitHub ---------------- */
-const DESFAZER_MS = 8000;
+const DESFAZER_MS = 15000;   // Desfazer em todo o app (era 8 s; curto demais nos testes de 30/10)
 let adiado = null;
 function efetivarAdiado() { if (!adiado) return; const a = adiado; adiado = null; clearTimeout(a.timer); a.fazer(); }
 function contarDentro(n) { let d = 0, x = n.anexos.length; const walk = k => k.direcoes.forEach(c => { d++; x += c.anexos.length; walk(c); }); walk(n); return { d, x }; }
@@ -1351,7 +1352,8 @@ document.addEventListener('pointerdown', e => { if (!at.hidden && !e.target.clos
 
 /* ---------------- toast, resize ---------------- */
 let toastT = 0;
-// toast(msg) ou toast(msg, { acao: 'Desfazer', fn, ms }): o botão some junto com o aviso
+// toast(msg) ou toast(msg, { acao: 'Desfazer', fn, ms, foco }): o botão some junto com o aviso; foco = o teclado vai
+// para o botão (Enter desfaz)
 function toast(msg, opt = {}) {
   document.querySelectorAll('.toast').forEach(t => t.remove());
   const t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status');
@@ -1362,6 +1364,7 @@ function toast(msg, opt = {}) {
     t.appendChild(b);
   }
   document.body.appendChild(t); clearTimeout(toastT); toastT = setTimeout(() => t.remove(), opt.ms || (opt.acao ? 6000 : 2800));
+  if (opt.foco && opt.acao) t.querySelector('.toast-b').focus({ preventScroll: true });
 }
 let rzT = 0;
 const onResize = () => { clearTimeout(rzT); rzT = setTimeout(() => {

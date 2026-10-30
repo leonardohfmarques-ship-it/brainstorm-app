@@ -110,7 +110,9 @@ export function criarEtapas(ctx) {
     }
     const partes = [];
     if (nv.respostas) partes.push(nv.respostas === 1 ? '1 nova' : `${nv.respostas} novas`);
-    if (nv.rumo) partes.push(nv.respostas ? 'e o rumo' : 'o rumo mudou');
+    if (nv.tiradas) partes.push(nv.tiradas === 1 ? '1 apagada' : `${nv.tiradas} apagadas`);
+    if (nv.fora && !nv.tiradas) partes.push('descartadas mudaram');
+    if (nv.rumo) partes.push(partes.length ? 'e o rumo' : 'o rumo mudou');
     const dica = nv.algo ? `O Claude lê, diz o que entendeu e ajusta as sugestões. Não mexe no que tu escreveu.${sem ? ` ${sem === 1 ? '1 pergunta sem resposta fica' : `${sem} perguntas sem resposta ficam`} em aberto.` : ''}`
       : nv.nunca ? 'Responde pelo menos uma' : 'Nada novo desde o último envio';
     return `<button class="btn btn--sm btn--solid" data-envia${nv.algo ? '' : ' disabled'} title="${esc(nv.algo ? 'Manda as respostas ao Claude para ele entender o novo direcionamento' : dica)}">${ICON.claude}Enviar respostas${partes.length ? ` · ${esc(partes.join(' '))}` : ''}</button><small class="nota">${esc(dica)}</small>`;
@@ -161,6 +163,11 @@ export function criarEtapas(ctx) {
       <div class="fx-wb"><button class="btn btn--sm" data-cancela="${f.id}">${ICON.x}Cancelar pedido</button>${local ? `<button class="btn btn--sm btn--ghost" data-simula="${f.id}" title="Só no modo local: escreve uma resposta de exemplo">Simular resposta (modo local)</button>` : ''}</div></div>`;
     const botao = f => {
       if (!f.pede || est(f.id) === 'obras') return '';
+      // Mais perguntas com 3 ou mais abertas: desligado (gastava uma ida ao Claude sem gerar nada)
+      if (f.id === 'perguntas' && est(f.id) === 'pronto' && I.semResposta(it) >= I.ABERTAS_LIMITE)
+        return `<span class="fx-trava"><button class="btn btn--sm" disabled title="Responde as abertas primeiro">${ICON.claude}${esc(f.de_novo)}</button><small>Responde as abertas primeiro</small></span>`;
+      // Comparar só existe com direções irmãs
+      if (f.id === 'comparar' && !irmas.length && est(f.id) !== 'pronto') return '';
       // variáveis: "de novo" só depois de o Claude já ter sugerido (o que ele preencheu não conta)
       const pronto = f.id === 'variaveis' ? Object.keys(it.sugestoes).length > 0 : est(f.id) === 'pronto';
       const rot = pronto ? f.de_novo : f.pede;
@@ -242,7 +249,8 @@ export function criarEtapas(ctx) {
       const pe = emObras
         ? `<div class="pg-pe pg-pe--obras" role="status"><span class="pg-ap-st">Claude aprofundando esta resposta…</span><button class="mini" data-aprofunda-cancela>cancelar</button>${local ? `<button class="mini" data-aprofunda-simula title="Só no modo local: escreve uma pergunta de exemplo">simular (modo local)</button>` : ''}</div>`
         : podeGalho && !outroAprofundando ? `<div class="pg-pe"${p.r.trim() ? '' : ' hidden'} data-pe="${k}"><button class="mini pg-ap" data-aprofunda="${k}" title="O Claude faz 1 ou 2 perguntas que partem desta resposta">${I.SETA} aprofundar esta</button></div>` : '';
-      return `<li class="pg-n${p.nivel}${filha ? ' pg--filha' : ''}${p.r.trim() ? ' is-resp' : ''}" style="--n:${p.nivel}">${trilhos(k)}<label class="pg-q" for="pg-${k}">${filha ? `<span class="pg-seta" aria-label="nasceu da resposta de cima">${I.SETA}</span> ` : ''}${esc(p.q)}</label><button class="pg-x" data-exclui="${k}" aria-label="Excluir a pergunta: ${esc(p.q)}" title="${I.filhasDe(ps, k).length ? 'Não está alinhada: excluir com as que nasceram dela (dá para desfazer)' : 'Não está alinhada: excluir (dá para desfazer)'}">${ICON.x}</button><textarea class="notas pg-r" id="pg-${k}" data-resp="${k}" rows="2" placeholder="Tua resposta…">${esc(p.r)}</textarea>${pe}</li>`;
+      const tua = it.minhas.includes(I.codigoPergunta(p.q)) ? ` <span class="pg-tua" title="Pergunta tua: o Mais perguntas não a aprofunda sozinho">tua</span>` : '';
+      return `<li class="pg-n${p.nivel}${filha ? ' pg--filha' : ''}${p.r.trim() ? ' is-resp' : ''}" style="--n:${p.nivel}">${trilhos(k)}<label class="pg-q" for="pg-${k}">${filha ? `<span class="pg-seta" aria-label="nasceu da resposta de cima">${I.SETA}</span> ` : ''}${esc(p.q)}${tua}</label><button class="pg-x" data-exclui="${k}" aria-label="Excluir a pergunta: ${esc(p.q)}" title="${I.filhasDe(ps, k).length ? 'Não está alinhada: excluir com as que nasceram dela (dá para desfazer)' : 'Não está alinhada: excluir (dá para desfazer)'}">${ICON.x}</button><textarea class="notas pg-r" id="pg-${k}" data-resp="${k}" rows="2" placeholder="Tua resposta…">${esc(p.r)}</textarea>${pe}</li>`;
     };
     const cartao = {
       perguntas() {
@@ -268,8 +276,11 @@ export function criarEtapas(ctx) {
             <label class="lab" for="pg-nova-r">Resposta</label><textarea class="notas pg-r" id="pg-nova-r" data-nova-r rows="2" placeholder="A tua resposta"></textarea>
             <div class="fx-wb"><button class="btn btn--sm btn--solid" data-nova-ok>Acrescentar</button><small class="nota">Entra na lista como as outras.</small></div></div></details>`
           + envio
-          + (it.descartadas.length ? `<details class="pg-desc" data-pgdesc${descAberto ? ' open' : ''}><summary><span class="lab">Descartadas · ${it.descartadas.length}</span><span class="mini fx-dobra" aria-hidden="true"></span></summary>
-            <ul>${it.descartadas.map((q, k) => `<li><span>${esc(q)}</span><button class="mini" data-traz="${k}">trazer de volta</button></li>`).join('')}</ul>
+          + (it.descartes.length ? `<details class="pg-desc" data-pgdesc${descAberto ? ' open' : ''}><summary><span class="lab">Descartadas · ${it.descartes.length}</span><span class="mini fx-dobra" aria-hidden="true"></span></summary>
+            <ul>${it.descartes.map((g, k) => {
+              const extra = [g[0].r ? 'com a tua resposta' : '', g.length > 1 ? (g.length === 2 ? '+ 1 que nasceu dela' : `+ ${g.length - 1} que nasceram dela`) : ''].filter(Boolean).join(' · ');
+              return `<li><span>${esc(g[0].q)}${extra ? `<small>${esc(extra)}</small>` : ''}</span><button class="mini" data-traz="${k}" title="Volta como estava: pergunta, resposta e as que nasceram dela">trazer de volta</button></li>`;
+            }).join('')}</ul>
             <small class="nota">O Claude não volta a elas nem faz parecidas.</small></details>` : '');
         return card(F.perguntas, corpo, { extra: it.perguntas.length ? `${respondidas} de ${it.perguntas.length} respondidas` : '' });
       },
@@ -301,7 +312,7 @@ export function criarEtapas(ctx) {
       },
       referencias: () => card(F.referencias, `<div class="ref-add"><input data-ref placeholder="Cola um link (ou link de imagem) e Enter" aria-label="Novo link de referência" autocomplete="off"></div>`
         + campoHTML(id('ref'), it.referencias, it.base, 'Links, nomes, notas. Imagem: cola o link dela.', 'Imagem: ![](link da imagem).')),
-      comparar: () => card(F.comparar, (irmas.length && !it.comparar.trim() ? `<p class="empty">Irmãs: ${irmas.map(d => esc(d.titulo)).join(' · ')}</p>` : '')
+      comparar: () => !irmas.length && !it.comparar.trim() ? card(F.comparar, `<p class="empty">Não há direções irmãs para comparar: esta é a única opção do seu nível no mapa.</p>`) : card(F.comparar, (irmas.length && !it.comparar.trim() ? `<p class="empty">Irmãs: ${irmas.map(d => esc(d.titulo)).join(' · ')}</p>` : '')
         + campoHTML(id('cmp'), it.comparar, it.base, 'O Claude põe as direções irmãs lado a lado e diz o que vale puxar delas.', 'Cada irmã começa com ###.', compararVer))
     };
 
@@ -399,6 +410,9 @@ export function criarEtapas(ctx) {
       const p = it.perguntas[+t.dataset.resp]; if (!p) return;
       gravar(I.remendoResposta(p.h, t.value), `App: responde perguntas em "${titulo}"`);
       const pe = el.querySelector(`[data-pe="${t.dataset.resp}"]`); if (pe) pe.hidden = !t.value.trim();
+      // "X de Y respondidas" acompanha enquanto ele escreve
+      const c = el.querySelector('[data-extra="perguntas"]'), j = atual();
+      if (c) c.textContent = `${j.perguntas.filter(x => x.r.trim()).length} de ${j.perguntas.length} respondidas`;
       atualizarEnvio();
     }));
     // o rumo dele: grava como ele escreve (a bússola das ferramentas)
@@ -432,7 +446,7 @@ export function criarEtapas(ctx) {
       gravar(I.remendoManter(atual(), b.dataset.manter), `App: mantém ${I.FERRAMENTA[b.dataset.manter].nome.toLowerCase()} de "${titulo}" como está`);
       renderEdicao();
     }));
-    // excluir pergunta: some na hora, vira "descartada" e dá para desfazer por 8 s
+    // excluir pergunta: some na hora, vira "descartada" (com a resposta e o galho) e dá para desfazer por 15 s
     const curta = q => q.length > 48 ? q.slice(0, 47) + '…' : q;
     el.querySelectorAll('[data-exclui]').forEach(b => b.addEventListener('click', () => {
       const q0 = it.perguntas[+b.dataset.exclui]; if (!q0) return;
@@ -441,15 +455,19 @@ export function criarEtapas(ctx) {
       const galho = I.galhoDe(j.perguntas, k).map(x => j.perguntas[x]), nf = galho.length - 1;
       gravar(I.remendoExcluir(j, p.q), `App: descarta a pergunta "${curta(p.q)}"${nf ? ` e ${nf} de seguimento` : ''} em "${titulo}"`);
       renderEdicao();
-      toast(`Pergunta excluída${nf ? ` com ${nf === 1 ? 'a que nasceu dela' : `as ${nf} que nasceram dela`}` : ''}: “${curta(p.q)}”`, { acao: 'Desfazer', ms: 8000, fn: () => {
+      // o × da pergunta seguinte cai embaixo do cursor: fica inerte por um instante (não apaga duas sem querer)
+      const lista = el.querySelector('.pergs'); if (lista) { lista.classList.add('is-pausa'); setTimeout(() => lista.classList.remove('is-pausa'), 900); }
+      toast(`Pergunta excluída${nf ? ` com ${nf === 1 ? 'a que nasceu dela' : `as ${nf} que nasceram dela`}` : ''}: “${curta(p.q)}”`, { acao: 'Desfazer', ms: ctx.DESFAZER_MS, foco: true, fn: () => {
         const txt = st().texto(it.file); if (txt == null) return;
         gravar(I.remendoVolta(txt, galho, k), `App: desfaz descartar a pergunta "${curta(p.q)}" em "${titulo}"`);
         renderEdicao();
       } });
     }));
     el.querySelectorAll('[data-traz]').forEach(b => b.addEventListener('click', () => {
-      const q = it.descartadas[+b.dataset.traz]; if (q == null) return;
-      gravar(I.remendoTrazer(atual(), q), `App: traz de volta a pergunta "${curta(q)}" em "${titulo}"`);
+      const g = atual().descartes[+b.dataset.traz]; if (!g) return;
+      const txt = st().texto(it.file); if (txt == null) return;
+      const r = I.remendoTrazer(txt, +b.dataset.traz); if (!r) return;
+      gravar(r, `App: traz de volta a pergunta "${curta(g[0].q)}"${g.length > 1 ? ` e ${g.length - 1} de seguimento` : ''} em "${titulo}"`);
       renderEdicao();
     }));
     // "↳ aprofundar esta": o Claude faz 1 ou 2 perguntas que partem desta resposta (uma de cada vez)
@@ -732,7 +750,7 @@ export function criarEtapas(ctx) {
     const t = i.plano[col].tarefas[k]; if (!t) return;
     const antes = P.copiar(i.plano);
     gravar(i, P.apagar(i.plano, col, k), `App: apaga uma tarefa de "${i.titulo}"`, { col, i: Math.max(0, k - 1) });
-    toast(`Tarefa apagada: “${t.texto.slice(0, 40)}${t.texto.length > 40 ? '…' : ''}”`, { acao: 'Desfazer', ms: 7000, fn: () => {
+    toast(`Tarefa apagada: “${t.texto.slice(0, 40)}${t.texto.length > 40 ? '…' : ''}”`, { acao: 'Desfazer', ms: ctx.DESFAZER_MS, foco: true, fn: () => {
       const j = porKey(i.key); if (!j) return;
       // volta no lugar (as outras mudanças feitas depois continuam)
       const novo = P.copiar(j.plano); novo[col].tarefas.splice(Math.min(k, novo[col].tarefas.length), 0, antes[col].tarefas[k]);

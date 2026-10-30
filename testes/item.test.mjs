@@ -349,7 +349,7 @@ test('campo livre (para onde eu quero): nasce no começo de Perguntas, grava o t
   assert.equal(it.rumo, 'Ser um vídeo só.');
   assert.deepEqual(it.perguntas.map(p => p.q), ['Para quem é']);
   assert.deepEqual(it.descartadas, ['Quanto tempo tenho?']);
-  assert.match(lerSecao(abrir(t), ['Perguntas']), /^### Para onde eu quero\nSer um vídeo só\.\n\n### Para quem é\n\n### Descartadas\n- Quanto tempo tenho\?$/);
+  assert.match(lerSecao(abrir(t), ['Perguntas']), /^### Para onde eu quero\nSer um vídeo só\.\n\n### Para quem é\n\n### Descartadas\n- Quanto tempo tenho\?\n    > Duas semanas\.$/);
   assert.equal(fechar(abrir(t)), t);
 });
 
@@ -378,9 +378,9 @@ test('excluir pergunta: vira descartada; Desfazer devolve o arquivo exato; exclu
   const fila = juntar(juntar(I.remendoResposta('Precisa de convidado / parceiro?', 'v1'), I.remendoExcluir(it, p.q)), I.remendoResposta('Precisa de convidado / parceiro?', 'v2'));
   const f = I.lerItem('x/item.md', aplicar(COMPLETO, fila));
   assert.deepEqual(f.perguntas.map(x => [x.q, x.r]), [['Precisa de convidado / parceiro?', 'v2']]);
-  // trazer de volta depois (sem resposta), e a lista de descartadas some quando esvazia
-  const tr = aplicar(ex, I.remendoTrazer(i1, 'Quem assiste primeiro?'));
-  assert.deepEqual(I.lerItem('x/item.md', tr).perguntas.map(x => x.q), ['Precisa de convidado / parceiro?', 'Quem assiste primeiro?']);
+  // trazer de volta depois (com a resposta, desde 30/10), e a lista de descartadas some quando esvazia
+  const tr = aplicar(ex, I.remendoTrazer(ex, 0));
+  assert.deepEqual(I.lerItem('x/item.md', tr).perguntas.map(x => [x.q, x.r]), [['Precisa de convidado / parceiro?', ''], [p.q, p.r]]);
   assert.ok(!tr.includes('### Descartadas'));
 });
 
@@ -411,7 +411,8 @@ test('marca de enviado: mesma conta do sistema/ferramentas.py', () => {
   assert.equal(I.codigoResposta('Quem assiste  primeiro?', 'Quem nunca\n tatuou.'), '88d8c192');
   assert.equal(I.codigoRumo('Quero que vire uma série curta, só eu na câmera.'), 'b01c876b');
   assert.equal(I.marca('ção 🎨'), '10c2d05d');
-  assert.deepEqual(I.lerMarca('rumo=b01c876b 88d8c192 lixo'), { rumo: 'b01c876b', cods: new Set(['88d8c192']) });
+  assert.deepEqual(I.lerMarca('rumo=b01c876b 88d8c192 lixo'), { rumo: 'b01c876b', fora: null, cods: new Set(['88d8c192']) });
+  assert.deepEqual(I.lerMarca('rumo=b01c876b fora=811c9dc5 88d8c192'), { rumo: 'b01c876b', fora: '811c9dc5', cods: new Set(['88d8c192']) });
 });
 
 test('"O que entendi" e a marca de enviado: ida e volta exata, leitura e lugar fixo', () => {
@@ -440,17 +441,17 @@ test('botão "Enviar respostas": liga com resposta nova, mudada ou rumo mudado; 
   let t = I.novoItem({ cadeia: cadeia(m, 'a'), hoje: '2026-10-28' }).text;
   t = aplicar(t, { sec: { Perguntas: '### Uma?\n\n### Duas?' } });
   let it = I.lerItem('x/item.md', t);
-  assert.deepEqual(I.novidades(it), { respostas: 0, rumo: false, algo: false, nunca: true });   // "Responde pelo menos uma"
+  assert.deepEqual(I.novidades(it), { respostas: 0, tiradas: 0, rumo: false, fora: false, algo: false, nunca: true });   // "Responde pelo menos uma"
   t = aplicar(t, I.remendoResposta('Uma?', 'Sim.'));
   it = I.lerItem('x/item.md', t);
-  assert.deepEqual(I.novidades(it), { respostas: 1, rumo: false, algo: true, nunca: true });
+  assert.deepEqual(I.novidades(it), { respostas: 1, tiradas: 0, rumo: false, fora: false, algo: true, nunca: true });
   t = aplicar(t, I.remendoRumo('Para lá.'));
   it = I.lerItem('x/item.md', t);
   assert.equal(I.novidades(it).rumo, true);
   // enviar: pedido + marca do que está indo
   const env = I.remendoEnviar(it);
   assert.equal(env.fm.pedido, 'respostas');
-  assert.equal(env.fm.enviando, `rumo=${I.codigoRumo('Para lá.')} ${I.codigoResposta('Uma?', 'Sim.')}`);
+  assert.equal(env.fm.enviando, `rumo=${I.codigoRumo('Para lá.')} fora=${I.codigoFora([])} ${I.codigoResposta('Uma?', 'Sim.')}`);
   const antes = t;
   t = aplicar(t, env);
   it = I.lerItem('x/item.md', t);
@@ -460,12 +461,12 @@ test('botão "Enviar respostas": liga com resposta nova, mudada ou rumo mudado; 
   // a Action responde: "enviando" vira "enviadas" e o botão desliga
   t = aplicar(t, { fm: { pedido: null, enviando: null, enviadas: it.enviando } });
   it = I.lerItem('x/item.md', t);
-  assert.deepEqual(I.novidades(it), { respostas: 0, rumo: false, algo: false, nunca: false });   // "Nada novo"
-  // mudar uma resposta, responder outra, só espaços a mais (não conta), apagar uma (não conta)
+  assert.deepEqual(I.novidades(it), { respostas: 0, tiradas: 0, rumo: false, fora: false, algo: false, nunca: false });   // "Nada novo"
+  // mudar uma resposta, responder outra, só espaços a mais (não conta); apagar uma enviada conta (desde 30/10)
   assert.equal(I.novidades(I.lerItem('x/item.md', aplicar(t, I.remendoResposta('Uma?', '  Sim.  ')))).algo, false);
   assert.equal(I.novidades(I.lerItem('x/item.md', aplicar(t, I.remendoResposta('Uma?', 'Não.')))).respostas, 1);
   assert.equal(I.novidades(I.lerItem('x/item.md', aplicar(t, I.remendoResposta('Duas?', 'Também.')))).respostas, 1);
-  assert.equal(I.novidades(I.lerItem('x/item.md', aplicar(t, I.remendoResposta('Uma?', '')))).algo, false);
+  assert.deepEqual(I.novidades(I.lerItem('x/item.md', aplicar(t, I.remendoResposta('Uma?', '')))), { respostas: 0, tiradas: 1, rumo: false, fora: false, algo: true, nunca: false });
   const r2 = I.novidades(I.lerItem('x/item.md', aplicar(t, I.remendoRumo('Outro lugar.'))));
   assert.deepEqual([r2.respostas, r2.rumo], [0, true]);
   // apagar o rumo enviado também conta como mudança
