@@ -69,7 +69,9 @@ export function criarEtapas(ctx) {
      estão no jeito antigo (a ideia inteira com estado "edicao") aparecem num grupo à parte, como eram. */
   const itensEm = e => M().itens.filter(x => x.estado === e);
   const porKey = k => M().ideias.find(x => x.key === k) || M().itens.find(x => x.key === k);
-  const prontas = it => I.PRINCIPAIS.filter(f => I.estadoFerramenta(it, f) === 'pronto').length;
+  // desatualizado não conta como pronto (nem aqui, nem na linha dos passos, nem no Kanban)
+  const prontas = it => I.prontas(it);
+  let confirmaFim = null;             // "o plano está desatualizado, mandar assim?" aberto (chave do item)
   let ctxAberto = false;              // o contexto herdado começa recolhido
   const nivAberto = new Set();        // níveis do contexto abertos (a ponta abre sozinha)
   let extrasAberto = false;           // Extras (Referências e Comparar) começam recolhidos
@@ -82,7 +84,10 @@ export function criarEtapas(ctx) {
     const i = todos.find(x => x.key === UI.ed) || todos[0];
     if (i && UI.ed !== i.key) { UI.ed = i.key; ctx.saveUI(); }
     const metaLista = x => {
-      if (x.kind === 'item') { const em = x.pedidos.length ? ' · Claude escrevendo' : ''; return `${x.codigo ? x.codigo + ' · ' : ''}${I.PASSO[x.passo].nome} · ${prontas(x)} de ${I.PRINCIPAIS.length} prontas${em}`; }
+      if (x.kind === 'item') {
+        const em = x.pedidos.length ? ' · Claude escrevendo' : '', v = I.velhos(x).length;
+        return `${x.codigo ? x.codigo + ' · ' : ''}${I.PASSO[x.passo].nome} · ${prontas(x)} de ${I.PRINCIPAIS.length} prontas${v ? ` · ${v} desatualizad${v === 1 ? 'o' : 'os'}` : ''}${em}`;
+      }
       const n = P.total(x.plano);
       return n ? `plano · ${plural(n, 'tarefa', 'tarefas')}` : x.edicao.escolhas.trim() ? 'escolhas feitas' : 'falta escolher';
     };
@@ -138,6 +143,7 @@ export function criarEtapas(ctx) {
   const notaVars = temSug => temSug
     ? 'O que está no campo é o ponto de partida. “Palpite do Claude” é só palpite: a versão final e o plano tratam como a decidir, nunca como compromisso teu. Escreve por cima para decidir; se apagar o que escreveu, volta o palpite.'
     : 'Escreve as tuas ou pede ao Claude: o que ele sugerir entra como palpite, e tu decide escrevendo por cima.';
+  const velhoTexto = it => { const v = I.fecharVelho(it); return v.length === 2 ? 'A versão final e o plano estão desatualizados' : v[0] === 'plano' ? 'O plano está desatualizado' : 'A versão final está desatualizada'; };
   const contaVars = it => `${I.VARIAVEIS.filter(k => it.valem[k].valor).length} de ${I.VARIAVEIS.length}`;
 
   function renderItem(it, lado) {
@@ -168,7 +174,9 @@ export function criarEtapas(ctx) {
     const desatHTML = f => `<div class="fx-desat" role="note"><span>Tuas respostas mudaram, refazer?</span><button class="btn btn--sm" data-pede="${f.id}" title="Pede ao Claude de novo, com as respostas novas">${ICON.claude}${esc(f.de_novo)}</button><button class="mini" data-manter="${f.id}" title="Tira o aviso e deixa como está">manter assim</button></div>`;
     const card = (f, corpo, o = {}) => {
       const e = est(f.id), dv = velho(f);
-      const cab = `<span class="fx-d" aria-hidden="true"></span><b class="fx-t">${esc(f.nome)}</b><span class="fx-st">${ROT[e]}${dv ? ' · desatualizado' : ''}${o.extra ? ' · ' : ''}<span data-extra="${f.id}">${esc(o.extra || '')}</span></span><span class="sp"></span>${botao(f)}`;
+      // desatualizado: o Refazer fica só no aviso (um botão só); "mantido assim" = escolha dele, registrada
+      const mant = e === 'pronto' && !dv && it.mantido.includes(f.id) ? ' · mantido assim' : '';
+      const cab = `<span class="fx-d" aria-hidden="true"></span><b class="fx-t">${esc(f.nome)}</b><span class="fx-st">${dv ? 'desatualizado' : ROT[e]}${mant}${o.extra ? ' · ' : ''}<span data-extra="${f.id}">${esc(o.extra || '')}</span></span><span class="sp"></span>${dv ? '' : botao(f)}`;
       const body = `<div class="fx-b">${e === 'obras' ? obrasHTML(f) : ''}${dv ? desatHTML(f) : ''}${corpo}</div>`;
       return `<section class="fx fx--${e}${dv ? ' fx--velho' : ''}${o.cls || ''}" id="fx-${f.id}" aria-labelledby="fxt-${f.id}"><header class="fx-h" id="fxt-${f.id}">${cab}</header>${body}</section>`;
     };
@@ -302,9 +310,13 @@ export function criarEtapas(ctx) {
     const voltar = ant ? `<button class="btn btn--sm btn--ghost" data-passo="${ant.id}">${ICON.ant}Voltar para ${esc(ant.nome)}</button>` : '';
     const seguir = prox
       ? `<small class="nota">${esc(DEPOIS[passo.id])}</small><button class="btn btn--solid" data-passo="${prox.id}">Seguir para ${esc(prox.nome)}${ICON.prox}</button>`
-      : `<small class="nota">${n ? 'As tarefas entram em A fazer, no Kanban.' : est('plano') === 'obras' ? 'O Claude está escrevendo o plano; o botão liga quando ele chegar.' : 'Primeiro “Gerar plano”, aqui em cima.'}</small><button class="btn btn--solid" data-act="kanban"${n ? '' : ' disabled'} title="${n ? 'As tarefas entram em A fazer' : 'Primeiro “Gerar plano”'}">${ICON.kanban}Mandar pro Kanban${ICON.prox}</button>`;
+      : `<small class="nota">${n ? (I.fecharVelho(it).length ? `${esc(velhoTexto(it))}: tuas respostas mudaram depois.` : 'As tarefas entram em A fazer, no Kanban.') : est('plano') === 'obras' ? 'O Claude está escrevendo o plano; o botão liga quando ele chegar.' : 'Primeiro “Gerar plano”, aqui em cima.'}</small><button class="btn btn--solid" data-act="kanban"${n ? '' : ' disabled'} title="${n ? 'As tarefas entram em A fazer' : 'Primeiro “Gerar plano”'}">${ICON.kanban}Mandar pro Kanban${ICON.prox}</button>`;
+    // plano ou versão desatualizados: "Mandar pro Kanban" pergunta antes (sem bloquear)
+    const conf = !prox && confirmaFim === it.key && I.fecharVelho(it).length
+      ? `<div class="fim-conf" role="alertdialog" aria-label="Plano desatualizado"><p><b>${esc(velhoTexto(it))}.</b> Tuas respostas mudaram depois. Mandar pro Kanban assim mesmo?</p>
+        <div class="fx-wb"><button class="btn btn--sm btn--solid" data-act="kanban-sim">${ICON.kanban}Mandar assim</button>${I.fecharVelho(it).includes('plano') ? `<button class="btn btn--sm" data-pede="plano">${ICON.claude}Refazer plano</button>` : ''}<button class="btn btn--sm btn--ghost" data-act="kanban-nao">Agora não</button></div></div>` : '';
     h += `<section class="passo" id="passo-corpo" aria-label="${esc(`${kp + 1}. ${passo.nome}`)}"><div class="fx-grid">${passo.cartoes.map(f => cartao[f]()).join('')}</div>
-      <div class="passo-fim">${voltar}<span class="sp"></span>${seguir}</div></section>`;
+      <div class="passo-fim">${voltar}<span class="sp"></span>${seguir}</div>${conf}</section>`;
 
     // Extras: fora do caminho, recolhidos, em qualquer passo
     const exAberto = extrasAberto || est('comparar') === 'obras';
@@ -336,7 +348,17 @@ export function criarEtapas(ctx) {
       const act = b.dataset.act;
       if (act === 'ver-mapa') ctx.verNoMapa(it);
       if (act === 'tirar') ctx.apagarItem(it);
-      if (act === 'kanban' && P.total(it.plano)) ctx.mudarEstado(it, 'kanban');
+      if (act === 'kanban' && P.total(it.plano)) {
+        // plano ou versão desatualizados: pergunta antes
+        if (I.fecharVelho(atual()).length && confirmaFim !== it.key) {
+          confirmaFim = it.key; renderEdicao();
+          const s = el.querySelector('[data-act="kanban-sim"]'); if (s) s.focus();
+          return;
+        }
+        confirmaFim = null; ctx.mudarEstado(it, 'kanban');
+      }
+      if (act === 'kanban-sim' && P.total(it.plano)) { confirmaFim = null; ctx.mudarEstado(it, 'kanban'); }
+      if (act === 'kanban-nao') { confirmaFim = null; renderEdicao(); }
     }));
     // passos: abrir um (na linha, ou "Seguir para…" / "Voltar para…" no fim) grava o passo no arquivo e volta à linha
     el.querySelectorAll('[data-passo]').forEach(b => b.addEventListener('click', () => {
@@ -363,7 +385,9 @@ export function criarEtapas(ctx) {
     }));
     el.querySelectorAll('[data-simula]').forEach(b => b.addEventListener('click', () => {
       const f = I.FERRAMENTA[b.dataset.simula], ex = I.exemplo(f.id); if (!ex) return;
-      gravar(Object.assign({ fm: { pedido: I.comPedido(it.pedidos, f.id, false) } }, ex), `App: resposta de exemplo (modo local) para "${f.pede}"`);
+      // como a Action: refeito, deixa de estar desatualizado
+      const j = atual(), des = j.desatualizado.filter(x => x !== f.id), man = j.mantido.filter(x => x !== f.id);
+      gravar(Object.assign({ fm: { pedido: I.comPedido(j.pedidos, f.id, false), desatualizado: des.length ? des.join(', ') : null, mantido: man.length ? man.join(', ') : null } }, ex), `App: resposta de exemplo (modo local) para "${f.pede}"`);
       renderEdicao();
     }));
     // respostas: cada pergunta guarda a resposta embaixo dela
@@ -626,6 +650,10 @@ export function criarEtapas(ctx) {
         ${feita ? `<button class="btn btn--sm btn--solid" data-act="reabrir">${ICON.kanban}Reabrir no Kanban</button>`
           : `<button class="btn btn--sm${n && feitos === n ? ' btn--solid' : ''}" data-act="concluir"${n && feitos === n ? '' : ' disabled'} title="${n && feitos === n ? 'Tudo feito: marca como concluída' : 'Libera quando tudo estiver em Feito'}">${ICON.check}${i.kind === 'item' ? 'Concluir' : 'Concluir ideia'}</button>`}
       </div></header>`;
+    // plano desatualizado (foi para cá assim): marca à vista e o Concluir pergunta antes
+    const kbVelho = i.kind === 'item' ? I.fecharVelho(i) : [];
+    if (kbVelho.length) h += `<div class="kb-velho" role="note"><span class="lab">Desatualizado</span><p>${esc(velhoTexto(i))}: as respostas mudaram depois. As tarefas podem não valer mais.</p><button class="btn btn--sm" data-act="voltar-ed">${ICON.back}Voltar para a Edição e refazer</button></div>`;
+    if (kbVelho.length && confirmaFim === i.key && !feita) h += `<div class="fim-conf" role="alertdialog" aria-label="Concluir com plano desatualizado"><p><b>${esc(velhoTexto(i))}.</b> Concluir assim mesmo?</p><div class="fx-wb"><button class="btn btn--sm btn--solid" data-act="concluir-sim">${ICON.check}Concluir assim</button><button class="btn btn--sm btn--ghost" data-act="concluir-nao">Agora não</button></div></div>`;
     h += `<div class="board" id="board">`;
     P.COLUNAS.forEach((c, ci) => {
       const ts = plano[c.id].tarefas;
@@ -660,7 +688,12 @@ export function criarEtapas(ctx) {
     el.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => {
       const act = b.dataset.act;
       if (act === 'voltar-ed') ctx.mudarEstado(i, 'edicao');
-      if (act === 'concluir' && n && feitos === n) ctx.mudarEstado(i, 'feita');
+      if (act === 'concluir' && n && feitos === n) {
+        if (kbVelho.length && confirmaFim !== i.key) { confirmaFim = i.key; renderKanban(); const s = el.querySelector('[data-act="concluir-sim"]'); if (s) s.focus(); return; }
+        confirmaFim = null; ctx.mudarEstado(i, 'feita');
+      }
+      if (act === 'concluir-sim' && n && feitos === n) { confirmaFim = null; ctx.mudarEstado(i, 'feita'); }
+      if (act === 'concluir-nao') { confirmaFim = null; renderKanban(); }
       if (act === 'reabrir') ctx.mudarEstado(i, 'kanban');
     }));
     ligarQuadro(i);

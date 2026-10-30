@@ -72,3 +72,42 @@ test('pacote 1: "Em aberto" do "O que entendi" sai à parte; o exemplo local fal
   assert.doesNotMatch(i1.entendido, /tu queres/);
   assert.equal(I.separarAberto(i1.entendido).aberto, 'Qual é o prazo? · Qual é o ritmo?');
 });
+
+/* ---------------- pacote 2 · desatualizado é sério ---------------- */
+const PRONTO = ITEM
+  .replace('criado: 2026-10-30\n', 'criado: 2026-10-30\ndesatualizado: estrutura, plano\n')
+  .replace('## Estrutura\n', '## Estrutura\n### 1. Gancho\nAbre.\n')
+  .replace('## Riscos\n', '## Riscos\n- **Um:** cuidado.\n')
+  .replace('## Versão final\n', '## Versão final\nTexto.\n')
+  .replace('### A fazer\n', '### A fazer\n- Gravar o piloto\n');
+
+test('pacote 2: desatualizado não conta como pronto (lista, passos, contagens)', () => {
+  const it = ler(PRONTO);
+  assert.equal(I.estadoFerramenta(it, 'plano'), 'pronto');     // o conteúdo está lá
+  assert.equal(I.estadoCartao(it, 'plano'), 'velho');           // mas para a tela é desatualizado
+  assert.equal(I.estadoCartao(it, 'versao'), 'pronto');
+  assert.equal(I.prontas(it), 4);                               // perguntas, variáveis, riscos, versão
+  assert.deepEqual(I.velhos(it), ['estrutura', 'plano']);
+  assert.equal(I.estadoPasso(it, 'montar'), 'velho');
+  assert.equal(I.estadoPasso(it, 'fechar'), 'velho');
+  assert.equal(I.estadoPasso(it, 'aprofundar'), 'pronto');
+  assert.deepEqual(I.fecharVelho(it), ['plano']);
+  // pedido aberto ganha de desatualizado
+  assert.equal(I.estadoPasso(ler(PRONTO.replace('desatualizado:', 'pedido: plano\ndesatualizado:')), 'fechar'), 'obras');
+});
+
+test('pacote 2: "manter assim" fica registrado e tira do aviso; respostas novas avisam de novo', () => {
+  let t = aplicar(PRONTO, I.remendoManter(ler(PRONTO), 'plano'));
+  let it = ler(t);
+  assert.deepEqual([it.desatualizado, it.mantido], [['estrutura'], ['plano']]);
+  assert.equal(I.estadoCartao(it, 'plano'), 'pronto');
+  assert.deepEqual(I.fecharVelho(it), []);
+  assert.equal(fechar(abrir(t)), t);
+  // manter de novo não duplica
+  assert.deepEqual(ler(aplicar(t, I.remendoManter(it, 'plano'))).mantido, ['plano']);
+  // envio de respostas (o exemplo local faz como a Action): o plano volta a desatualizado e sai do "mantido"
+  t = aplicar(t, I.remendoEnviar(ler(aplicar(t, I.remendoResposta('Qual é o prazo?', 'Até 20/11.')))));
+  it = ler(aplicar(t, I.exemploRespostas(ler(t))));
+  assert.ok(it.desatualizado.includes('plano'));
+  assert.deepEqual(it.mantido, []);
+});

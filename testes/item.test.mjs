@@ -476,8 +476,9 @@ test('botão "Enviar respostas": liga com resposta nova, mudada ou rumo mudado; 
 
 test('desatualizado: lê, "manter assim" tira um, o exemplo local marca só os prontos e não toca no que é dele', () => {
   const it = I.lerItem('x/item.md', ENVIADO);
-  assert.equal(aplicar(ENVIADO, I.remendoManter(it, 'versao')), ENVIADO.replace('desatualizado: estrutura, versao', 'desatualizado: estrutura'));
-  assert.equal(aplicar(ENVIADO, I.remendoManter(I.lerItem('x/item.md', ENVIADO.replace(', versao', '')), 'estrutura')), ENVIADO.replace('desatualizado: estrutura, versao\n', ''));
+  // "manter assim" fica registrado em "mantido:" (escolha dele)
+  assert.equal(aplicar(ENVIADO, I.remendoManter(it, 'versao')), ENVIADO.replace('desatualizado: estrutura, versao', 'desatualizado: estrutura\nmantido: versao'));
+  assert.equal(aplicar(ENVIADO, I.remendoManter(I.lerItem('x/item.md', ENVIADO.replace(', versao', '')), 'estrutura')), ENVIADO.replace('desatualizado: estrutura, versao\n', 'mantido: estrutura\n'));
   assert.deepEqual(I.lerItem('x/item.md', ENVIADO.replace('estrutura, versao', 'estrutura, nada, riscos')).desatualizado, ['estrutura', 'riscos']);
   // modo local: o que a Action faria (com "riscos" pedido junto, ele não fica desatualizado)
   const t0 = aplicar(COM_RUMO, I.remendoEnviar(I.lerItem('x/item.md', COM_RUMO)));

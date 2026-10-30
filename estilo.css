@@ -805,3 +805,12 @@ textarea.var-in{display:block;width:100%;min-height:38px;border:2px solid var(--
 .pg-conf{flex:1 1 100%;padding:12px 14px;border:2px solid var(--ink);border-radius:8px;background:var(--paper)}
 .pg-conf p{margin:0 0 10px;font-size:15px;line-height:1.4}
 .pg-conf .fx-wb{margin:0}
+
+/* 30/10 · desatualizado é sério: não conta como pronto, e Kanban/Concluir perguntam antes */
+.rota-p--velho .d{background:var(--paper);border-style:dashed}
+.fim-conf{margin:12px 0 0;padding:12px 14px;border:2px solid var(--ink);border-radius:8px;background:var(--paper)}
+.fim-conf p{margin:0 0 10px;font-size:15px;line-height:1.4}
+.fim-conf .fx-wb{margin:0}
+.kb-velho{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 16px;padding:10px 14px;border:2px dashed var(--ink);border-radius:8px;background:var(--lap)}
+.kb-velho .lab{margin:0}
+.kb-velho p{flex:1 1 220px;margin:0;font-size:15px;line-height:1.35}

@@ -223,7 +223,7 @@ export function lerItem(path, text) {
     rumo: ler(['Perguntas', RUMO]) || '', descartadas: lerDescartadas(ler(['Perguntas', DESCARTADAS]) || ''),
     entendido: ler(['Perguntas', ENTENDI]) || '',
     enviadas: String(f.enviadas == null ? '' : f.enviadas), enviando: String(f.enviando == null ? '' : f.enviando),
-    desatualizado: lerLista(f.desatualizado, DEPENDEM),
+    desatualizado: lerLista(f.desatualizado, DEPENDEM), mantido: lerLista(f.mantido, DEPENDEM),
     variaveis: vars.valores, varExtras: vars.extras, sugestoes: sug.valores, valem: valem(vars.valores, sug.valores),
     passo: lerPasso(f.passo),
     estrutura: ler(['Estrutura']) || '', riscos: ler(['Riscos']) || '', referencias: ler(['Referências']) || '',
@@ -249,6 +249,17 @@ export function estadoFerramenta(it, id) {
   return cheio ? 'pronto' : 'vazio';
 }
 
+// o estado que conta para a tela (lista lateral, linha dos passos, contagens, Kanban): desatualizado não é pronto.
+// 'velho' = pronto, mas feito antes das últimas respostas enviadas (e ele não escolheu "manter assim")
+export function estadoCartao(it, id) {
+  const e = estadoFerramenta(it, id);
+  return e === 'pronto' && it.desatualizado.includes(id) ? 'velho' : e;
+}
+export const prontas = it => PRINCIPAIS.filter(f => estadoCartao(it, f) === 'pronto').length;
+export const velhos = it => PRINCIPAIS.filter(f => estadoCartao(it, f) === 'velho');
+// "Mandar pro Kanban" e "Concluir" avisam antes quando o plano ou a versão final estão desatualizados
+export const fecharVelho = it => ['versao', 'plano'].filter(f => estadoCartao(it, f) === 'velho');
+
 /* ---------------- passo da página: "passo: montar" (sem a linha = Aprofundar) ---------------- */
 export function lerPasso(v) {
   const p = norm(v);
@@ -256,10 +267,12 @@ export function lerPasso(v) {
 }
 // o passo em que ele está fica no arquivo (vale no celular também); Aprofundar é o começo, sem linha
 export const remendoPasso = id => ({ fm: { passo: PASSO[id] && id !== PASSOS[0].id ? id : null } });
-// estado do passo pelos cartões dele: 'obras' (algum pedido aberto), 'pronto' (todos), 'meio' (algum) ou 'vazio'
+// estado do passo pelos cartões dele: 'obras' (algum pedido aberto), 'velho' (algum desatualizado), 'pronto'
+// (todos), 'meio' (algum) ou 'vazio'. Desatualizado nunca conta como pronto
 export function estadoPasso(it, id) {
-  const es = PASSO[id].cartoes.map(f => estadoFerramenta(it, f));
+  const es = PASSO[id].cartoes.map(f => estadoCartao(it, f));
   if (es.includes('obras')) return 'obras';
+  if (es.includes('velho')) return 'velho';
   if (es.every(e => e === 'pronto')) return 'pronto';
   return es.includes('pronto') ? 'meio' : 'vazio';
 }
@@ -423,10 +436,12 @@ export const remendoVariaveis = (valores, extras) => ({ sec: { [SEC_DECIDIDAS]: 
 /* ----- enviar respostas: o pedido "respostas" leva junto a marca do que está indo ----- */
 export const remendoEnviar = it => ({ fm: { pedido: comPedido(it.pedidos, 'respostas'), enviando: marcaDe(it) } });
 export const remendoCancelarEnvio = it => ({ fm: { pedido: comPedido(it.pedidos, 'respostas', false), enviando: null } });
-// "manter assim": tira o aviso de desatualizado de um cartão sem refazer
+// "manter assim": tira o aviso de desatualizado de um cartão sem refazer e registra a escolha dele em "mantido:"
+// (não volta a avisar; um envio novo de respostas, que muda o que o cartão leu, avisa de novo)
 export function remendoManter(it, id) {
   const resto = it.desatualizado.filter(x => x !== id);
-  return { fm: { desatualizado: resto.length ? resto.join(', ') : null } };
+  const mant = it.mantido.filter(x => x !== id).concat(DEPENDEM.includes(id) ? [id] : []);
+  return { fm: { desatualizado: resto.length ? resto.join(', ') : null, mantido: mant.length ? mant.join(', ') : null } };
 }
 // modo local: o que a Action faria (texto genérico de exemplo, nunca ideias dele)
 export function exemploRespostas(it) {
@@ -435,7 +450,8 @@ export function exemploRespostas(it) {
   const abertas = it.perguntas.filter(p => !p.r.trim()).map(p => p.q);
   const sec = { [SEC_ENTENDI]: 'Exemplo do modo local: tu quer algo curto e direto, para quem está começando.\nO foco mudou para mostrar o processo, não só o resultado.\nIsso puxa para um formato mais simples de gravar.' + (abertas.length ? '\nEm aberto: ' + abertas.join(' · ') : ''), ...ex.sec };
   if (!it.perguntas.some(p => /exemplo de seguimento/i.test(p.q))) sec[secao('Perguntas', 'Pergunta de exemplo de seguimento: o que muda se for em vídeo curto?')] = '';
-  return { fm: { pedido: comPedido(it.pedidos, 'respostas', false), enviando: null, enviadas: it.enviando || marcaDe(it), desatualizado: desat.length ? desat.join(', ') : null }, sec };
+  const mant = it.mantido.filter(f => !desat.includes(f));
+  return { fm: { pedido: comPedido(it.pedidos, 'respostas', false), enviando: null, enviadas: it.enviando || marcaDe(it), desatualizado: desat.length ? desat.join(', ') : null, mantido: mant.length ? mant.join(', ') : null }, sec };
 }
 
 // respostas de exemplo do modo local (?local=1): só para testar a tela; textos genéricos, nunca ideias dele
