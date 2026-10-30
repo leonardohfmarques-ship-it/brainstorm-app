@@ -97,11 +97,16 @@ export function criarEtapas(ctx) {
   }
 
   /* ----- "Enviar respostas": liga quando há resposta nova ou mudada (ou o rumo mudou) desde o último envio ----- */
-  function envioHTML(nv) {
+  // "sem" = perguntas ainda sem resposta: o envio avisa antes ("2 sem resposta, enviar assim?"), sem bloquear
+  function envioHTML(nv, sem = 0, confirma = false) {
+    if (confirma && nv.algo) {
+      return `<div class="pg-conf" role="alertdialog" aria-label="Perguntas sem resposta"><p><b>${esc(sem === 1 ? '1 sem resposta' : `${sem} sem resposta`)}, enviar assim?</b> O Claude trata ${sem === 1 ? 'essa' : 'essas'} como em aberto e não decide por ti.</p>
+        <div class="fx-wb"><button class="btn btn--sm btn--solid" data-envia-sim>${ICON.claude}Enviar assim</button><button class="btn btn--sm btn--ghost" data-envia-nao>Responder antes</button></div></div>`;
+    }
     const partes = [];
     if (nv.respostas) partes.push(nv.respostas === 1 ? '1 nova' : `${nv.respostas} novas`);
     if (nv.rumo) partes.push(nv.respostas ? 'e o rumo' : 'o rumo mudou');
-    const dica = nv.algo ? 'O Claude lê, diz o que entendeu e ajusta as sugestões. Não mexe no que tu escreveste.'
+    const dica = nv.algo ? `O Claude lê, diz o que entendeu e ajusta as sugestões. Não mexe no que tu escreveu.${sem ? ` ${sem === 1 ? '1 pergunta sem resposta fica' : `${sem} perguntas sem resposta ficam`} em aberto.` : ''}`
       : nv.nunca ? 'Responde pelo menos uma' : 'Nada novo desde o último envio';
     return `<button class="btn btn--sm btn--solid" data-envia${nv.algo ? '' : ' disabled'} title="${esc(nv.algo ? 'Manda as respostas ao Claude para ele entender o novo direcionamento' : dica)}">${ICON.claude}Enviar respostas${partes.length ? ` · ${esc(partes.join(' '))}` : ''}</button><small class="nota">${esc(dica)}</small>`;
   }
@@ -131,8 +136,8 @@ export function criarEtapas(ctx) {
   }
   // variáveis: o campo mostra o valor que vale (o dele ou, se ele não escreveu, o do Claude)
   const notaVars = temSug => temSug
-    ? 'O que está no campo é o que vale, e é isso que a estrutura, os riscos e o plano usam. Escreve por cima para trocar; se apagares o que escreveste, volta a do Claude.'
-    : 'Escreve as tuas ou pede ao Claude: o que ele sugerir já vale, e dá para trocar depois.';
+    ? 'O que está no campo é o ponto de partida. “Palpite do Claude” é só palpite: a versão final e o plano tratam como a decidir, nunca como compromisso teu. Escreve por cima para decidir; se apagar o que escreveu, volta o palpite.'
+    : 'Escreve as tuas ou pede ao Claude: o que ele sugerir entra como palpite, e tu decide escrevendo por cima.';
   const contaVars = it => `${I.VARIAVEIS.filter(k => it.valem[k].valor).length} de ${I.VARIAVEIS.length}`;
 
   function renderItem(it, lado) {
@@ -239,12 +244,14 @@ export function criarEtapas(ctx) {
           <textarea class="notas pg-rumo-t" id="pg-rumo" data-rumo rows="2" placeholder="Escreve do teu jeito o que tu queres que isto vire, mesmo que nenhuma pergunta leve lá.">${esc(it.rumo)}</textarea>
           <small class="nota">É a bússola: Mais perguntas, Estrutura, Riscos, Versão final e Plano seguem isto. O Claude nunca reescreve.</small></div>`;
         // o que o Claude entendeu do último envio (3 a 5 linhas), no topo do cartão
-        const entendi = it.entendido.trim() ? `<div class="pg-ent"><span class="lab">O que entendi <span>Claude · do último envio</span></span><div class="md">${md(it.entendido, it.base, ctx.backend())}</div></div>` : '';
+        // a linha "Em aberto: …" (o que ele ainda não decidiu) sai do texto e fica à parte, embaixo
+        const ent = I.separarAberto(it.entendido);
+        const entendi = it.entendido.trim() ? `<div class="pg-ent"><span class="lab">O que entendi <span>Claude · do último envio</span></span><div class="md">${md(ent.texto, it.base, ctx.backend())}</div>${ent.aberto ? `<p class="pg-aberto"><b>Em aberto</b>${esc(ent.aberto)}</p>` : ''}</div>` : '';
         const lendo = it.pedidos.includes('respostas');
         const envio = lendo
           ? `<div class="wait fx-wait pg-lendo" role="status"><strong>Claude lendo tuas respostas…</strong><p>Leva de 1 a 3 minutos. Ele escreve o que entendeu aqui em cima e ajusta as sugestões; podes mexer no resto.</p><div class="rail"><div class="runner"></div></div>
             <div class="fx-wb"><button class="btn btn--sm" data-envio-cancela>${ICON.x}Cancelar envio</button>${local ? `<button class="btn btn--sm btn--ghost" data-envio-simula title="Só no modo local: escreve uma resposta de exemplo">Simular resposta (modo local)</button>` : ''}</div></div>`
-          : (it.perguntas.length || it.rumo.trim() || it.entendido.trim()) ? `<div class="pg-envia" data-envia-bar>${envioHTML(I.novidades(it))}</div>` : '';
+          : (it.perguntas.length || it.rumo.trim() || it.entendido.trim()) ? `<div class="pg-envia" data-envia-bar>${envioHTML(I.novidades(it), I.semResposta(it))}</div>` : '';
         const corpo = entendi + rumo + (it.perguntas.length
           ? `<ol class="pergs">${it.perguntas.map((p, k) => perguntaHTML(p, k)).join('')}</ol>`
           : (est('perguntas') === 'obras' ? '' : `<p class="empty">O Claude faz até 5 perguntas, só as que mudam a ideia (público, formato, o que a torna boa, como fecha). Tu respondes aqui mesmo; as respostas entram em tudo o que ele escrever depois.</p>`))
@@ -263,7 +270,7 @@ export function criarEtapas(ctx) {
         const temSug = I.VARIAVEIS.some(k => String(it.sugestoes[k] || '').trim());
         const corpo = `<div class="vars">${I.VARIAVEIS.map(k => {
           const x = it.valem[k], sg = String(it.sugestoes[k] || '').trim();
-          return `<div class="var${x.de === 'claude' ? ' is-claude' : ''}"><label for="var-${k}">${k}<span class="var-de">do Claude</span></label><textarea class="var-in" id="var-${k}" data-var="${k}" rows="1" autocomplete="off" placeholder="${esc(sg || '—')}">${esc(x.valor)}</textarea></div>`;
+          return `<div class="var${x.de === 'claude' ? ' is-claude' : ''}"><label for="var-${k}">${k}<span class="var-de" title="Palpite do Claude: ainda não confirmado por ti">palpite do Claude</span></label><textarea class="var-in" id="var-${k}" data-var="${k}" rows="1" autocomplete="off" placeholder="${esc(sg || '—')}">${esc(x.valor)}</textarea></div>`;
         }).join('')}</div>${it.varExtras.length ? `<div class="md md-sm var-x">${md(it.varExtras.join('\n'), it.base, ctx.backend())}</div>` : ''}<small class="nota" data-varnota>${esc(notaVars(temSug))}</small>`;
         return card(F.variaveis, corpo, { extra: contaVars(it) });
       },
@@ -362,7 +369,8 @@ export function criarEtapas(ctx) {
     // respostas: cada pergunta guarda a resposta embaixo dela
     // a barra do "Enviar respostas" acompanha o que ele digita (sem redesenhar a página, o foco fica no campo)
     const barra = el.querySelector('[data-envia-bar]');
-    const atualizarEnvio = () => { if (barra) barra.innerHTML = envioHTML(I.novidades(atual())); };
+    let confirma = false;   // "2 sem resposta, enviar assim?" aberto
+    const atualizarEnvio = () => { if (barra) { const j = atual(); barra.innerHTML = envioHTML(I.novidades(j), I.semResposta(j), confirma); } };
     el.querySelectorAll('[data-resp]').forEach(t => t.addEventListener('input', () => {
       const p = it.perguntas[+t.dataset.resp]; if (!p) return;
       gravar(I.remendoResposta(p.h, t.value), `App: responde perguntas em "${titulo}"`);
@@ -373,8 +381,21 @@ export function criarEtapas(ctx) {
     const rumo = el.querySelector('[data-rumo]');
     if (rumo) rumo.addEventListener('input', () => { gravar(I.remendoRumo(rumo.value), `App: para onde quer levar "${titulo}"`); atualizarEnvio(); });
     if (barra) barra.addEventListener('click', e => {
-      const b = e.target.closest('[data-envia]'); if (!b || b.disabled) return;
+      if (e.target.closest('[data-envia-nao]')) {
+        confirma = false; atualizarEnvio();
+        const vazia = [...el.querySelectorAll('[data-resp]')].find(t => !t.value.trim()); if (vazia) vazia.focus();
+        return;
+      }
+      const sim = e.target.closest('[data-envia-sim]');
+      const b = sim || e.target.closest('[data-envia]'); if (!b || b.disabled) return;
       const j = atual(); if (!I.novidades(j).algo) return;
+      // perguntas sem resposta: avisa uma vez e deixa enviar assim (ficam em aberto para o Claude)
+      if (!sim && I.semResposta(j)) {
+        confirma = true; atualizarEnvio();
+        const s = barra.querySelector('[data-envia-sim]'); if (s) s.focus();
+        return;
+      }
+      confirma = false;
       gravar(I.remendoEnviar(j), `App: pede ao Claude para ler as respostas de "${titulo}"`);
       renderEdicao(); ctx.renderNav();
       toast(ctx.local() ? 'Respostas marcadas (modo local: o Claude não roda aqui).' : 'Respostas enviadas. Em 1 a 3 minutos o Claude diz o que entendeu.');

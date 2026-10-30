@@ -89,6 +89,16 @@ export function lerMarca(v) {
   }
   return { rumo, cods };
 }
+// "O que entendi" termina com "Em aberto: …" quando há perguntas vazias ou vagas (a Action garante): a tela mostra à parte
+export function separarAberto(md) {
+  const linhas = String(md || '').split('\n');
+  const k = linhas.map(l => norm(l).replace(/^[-*_\s]+/, '')).findIndex(l => l.startsWith('em aberto'));
+  if (k < 0) return { texto: String(md || ''), aberto: '' };
+  const aberto = linhas[k].replace(/^[-*_\s]*em aberto[*_]*\s*:?[*_]*\s*/i, '').trim();
+  return { texto: linhas.filter((_, j) => j !== k).join('\n').trim(), aberto };
+}
+// perguntas ainda sem resposta (em qualquer nível): o "Enviar respostas" avisa antes de mandar assim
+export const semResposta = it => it.perguntas.filter(p => !p.r.trim()).length;
 // o que mudou desde o último envio: respostas novas ou mudadas (as que ficaram vazias não contam) e o rumo
 export function novidades(it) {
   const m = lerMarca(it.enviadas);
@@ -422,7 +432,8 @@ export function remendoManter(it, id) {
 export function exemploRespostas(it) {
   const ex = exemplo('variaveis');
   const desat = DEPENDEM.filter(f => it.desatualizado.includes(f) || (estadoFerramenta(it, f) === 'pronto' && !it.pedidos.includes(f)));
-  const sec = { [SEC_ENTENDI]: 'Exemplo do modo local: tu queres algo curto e direto, para quem está começando.\nO foco mudou para mostrar o processo, não só o resultado.\nIsso puxa para um formato mais simples de gravar.', ...ex.sec };
+  const abertas = it.perguntas.filter(p => !p.r.trim()).map(p => p.q);
+  const sec = { [SEC_ENTENDI]: 'Exemplo do modo local: tu quer algo curto e direto, para quem está começando.\nO foco mudou para mostrar o processo, não só o resultado.\nIsso puxa para um formato mais simples de gravar.' + (abertas.length ? '\nEm aberto: ' + abertas.join(' · ') : ''), ...ex.sec };
   if (!it.perguntas.some(p => /exemplo de seguimento/i.test(p.q))) sec[secao('Perguntas', 'Pergunta de exemplo de seguimento: o que muda se for em vídeo curto?')] = '';
   return { fm: { pedido: comPedido(it.pedidos, 'respostas', false), enviando: null, enviadas: it.enviando || marcaDe(it), desatualizado: desat.length ? desat.join(', ') : null }, sec };
 }

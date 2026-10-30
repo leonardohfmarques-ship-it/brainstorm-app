@@ -797,3 +797,11 @@ textarea.var-in{display:block;width:100%;min-height:38px;border:2px solid var(--
   .passo-fim .btn--ghost{order:3}
 }
 @media (prefers-reduced-motion:reduce){.rota-p--obras .d,.fx--obras .fx-d{animation:none!important}}
+
+/* 30/10 · o Claude não decide por ele: palpite tracejado, "Em aberto" à parte, aviso antes de enviar */
+.var.is-claude textarea.var-in{border-style:dashed}
+.pg-aberto{display:flex;gap:10px;align-items:baseline;margin:10px 0 0;padding:8px 0 0;border-top:1.5px dashed rgba(74,68,48,.35);font:500 14.5px/1.4 var(--sans);color:#4A4430}
+.pg-aberto b{flex:none;font:500 11px/1.3 var(--mono);letter-spacing:.08em;text-transform:uppercase}
+.pg-conf{flex:1 1 100%;padding:12px 14px;border:2px solid var(--ink);border-radius:8px;background:var(--paper)}
+.pg-conf p{margin:0 0 10px;font-size:15px;line-height:1.4}
+.pg-conf .fx-wb{margin:0}
