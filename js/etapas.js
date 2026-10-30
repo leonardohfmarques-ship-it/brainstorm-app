@@ -10,6 +10,8 @@ export const nomeEtapa = e => NOME[e] || e;
 
 export function criarEtapas(ctx) {
   const { esc, ICON, toast, linkar, fmtData, fmtDataBR, rebaixar, plural } = ctx;
+  // tarefa do plano: título curto e, embaixo, as linhas de detalhe (desde 30/10)
+  const tarefaLi = t => { const d = P.detalhe(t); return `<li>${linkar(t.texto)}${d.length ? `<small class="plano-x">${linkar(d.join('\n'))}</small>` : ''}</li>`; };
   const UI = ctx.UI;
   const st = () => ctx.store();
   const M = () => st().model;
@@ -27,13 +29,25 @@ export function criarEtapas(ctx) {
     return `<li><button class="et-i${on ? ' is-sel' : ''}" data-key="${esc(i.key)}" style="--c:${a.c}"${on ? ' aria-current="true"' : ''}>
       <span class="bul">${esc(a.b)}</span><span class="t">${esc(i.titulo)}</span><span class="m">${esc(meta(i))}</span></button></li>`;
   }
+  // no celular (até 768 px) a lista fica recolhida quando há um item aberto: o cartão aparece na primeira tela
+  let ladoAberto = false;
   function ladoHTML(titulo, sub, grupos, sel, meta) {
-    return `<aside class="et-lista" aria-label="Ideias em ${esc(titulo)}"><header class="et-lh"><h2>${esc(titulo)}</h2><p>${esc(sub)}</p></header>`
+    const n = grupos.reduce((k, g) => k + g.itens.length, 0);
+    const temSel = grupos.some(g => g.itens.some(i => i.key === sel));
+    const dobra = temSel ? `<button class="et-lt" data-lado aria-expanded="${ladoAberto}">${ladoAberto ? 'Esconder a lista' : `Trocar de item · ${n}`}</button>` : '';
+    return `<aside class="et-lista${temSel ? ' tem-sel' : ''}${ladoAberto ? ' is-aberta' : ''}" aria-label="Ideias em ${esc(titulo)}"><header class="et-lh"><h2>${esc(titulo)}</h2><p>${esc(sub)}</p>${dobra}</header>`
       + grupos.filter(g => g.itens.length || !g.nome).map(g => `${g.nome ? `<span class="lab et-gn">${esc(g.nome)} · ${g.itens.length}</span>` : ''}<ul>${g.itens.map(i => itemHTML(i, sel, meta)).join('')}</ul>`).join('')
       + `</aside>`;
   }
   function ligarLado(onPick) {
-    el.querySelectorAll('.et-i').forEach(b => b.addEventListener('click', () => onPick(b.dataset.key)));
+    el.querySelectorAll('.et-i').forEach(b => b.addEventListener('click', () => { ladoAberto = false; onPick(b.dataset.key); }));
+    const lt = el.querySelector('[data-lado]');
+    if (lt) lt.addEventListener('click', () => {
+      ladoAberto = !ladoAberto;
+      const a = lt.closest('.et-lista'); a.classList.toggle('is-aberta', ladoAberto);
+      lt.setAttribute('aria-expanded', ladoAberto);
+      lt.textContent = ladoAberto ? 'Esconder a lista' : `Trocar de item · ${a.querySelectorAll('.et-i').length}`;
+    });
   }
   const vazioHTML = (titulo, texto, botao) => `<div class="et-corpo"><div class="et-vazio"><svg class="linhas" viewBox="0 0 320 60" aria-hidden="true"><path d="M0 44H120L150 14H320" fill="none" stroke="#111" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="2 14"/><circle cx="150" cy="14" r="9" fill="#fff" stroke="#111" stroke-width="4" stroke-dasharray="4 4"/></svg><h2>${esc(titulo)}</h2><p>${esc(texto)}</p>${botao ? `<button class="btn btn--solid" data-act="${botao.act}">${esc(botao.t)}</button>` : ''}</div></div>`;
 
@@ -287,9 +301,14 @@ export function criarEtapas(ctx) {
       variaveis() {
         // um campo só por variável, com o valor que vale; o do Claude leva a marca "do Claude" até ele escrever por cima
         const temSug = I.VARIAVEIS.some(k => String(it.sugestoes[k] || '').trim());
-        const corpo = `<div class="vars">${I.VARIAVEIS.map(k => {
+        // tipo da peça: conteúdo, projeto ou produto; o do Claude vem como palpite até ele escolher
+        const nomeTipo = v => (I.TIPOS.find(o => o.id === v) || {}).nome || '';
+        const tipo = `<div class="var var--tipo${it.tipo.de === 'claude' ? ' is-claude' : ''}"><label for="var-tipo">Tipo da peça<span class="var-de" title="Palpite do Claude: ainda não confirmado por ti">palpite do Claude</span></label>`
+          + `<select class="var-in var-sel" id="var-tipo" data-tipo><option value="">${it.tipoSugerido ? esc(nomeTipo(it.tipoSugerido)) : '— a decidir'}</option>`
+          + I.TIPOS.map(o => `<option value="${o.id}"${it.tipoDele === o.id ? ' selected' : ''}>${esc(o.nome)}</option>`).join('') + `</select></div>`;
+        const corpo = `<div class="vars">${tipo}${I.VARIAVEIS.map(k => {
           const x = it.valem[k], sg = String(it.sugestoes[k] || '').trim();
-          return `<div class="var${x.de === 'claude' ? ' is-claude' : ''}"><label for="var-${k}">${k}<span class="var-de" title="Palpite do Claude: ainda não confirmado por ti">palpite do Claude</span></label><textarea class="var-in" id="var-${k}" data-var="${k}" rows="1" autocomplete="off" placeholder="${esc(sg || '—')}">${esc(x.valor)}</textarea></div>`;
+          return `<div class="var${x.de === 'claude' ? ' is-claude' : ''}"><label for="var-${k}">${esc(I.nomeVar(k, it.tipo.valor))}<span class="var-de" title="Palpite do Claude: ainda não confirmado por ti">palpite do Claude</span></label><textarea class="var-in" id="var-${k}" data-var="${k}" rows="1" autocomplete="off" placeholder="${esc(sg || '—')}">${esc(x.valor)}</textarea></div>`;
         }).join('')}</div>${it.varExtras.length ? `<div class="md md-sm var-x">${md(it.varExtras.join('\n'), it.base, ctx.backend())}</div>` : ''}<small class="nota" data-varnota>${esc(notaVars(temSug))}</small>`;
         return card(F.variaveis, corpo, { extra: contaVars(it) });
       },
@@ -302,7 +321,7 @@ export function criarEtapas(ctx) {
           let k0 = 0;
           for (const c of P.COLUNAS) {
             const ts = it.plano[c.id].tarefas; if (!ts.length) continue;
-            plano += `<span class="lab">${esc(c.nome)} · ${ts.length}</span><ol class="plano-l" start="${k0 + 1}">${ts.map(t => `<li>${linkar(t.texto)}</li>`).join('')}</ol>`;
+            plano += `<span class="lab">${esc(c.nome)} · ${ts.length}</span><ol class="plano-l" start="${k0 + 1}">${ts.map(tarefaLi).join('')}</ol>`;
             k0 += ts.length;
           }
           plano += `<div class="fx-wb"><button class="mini" data-abre="${esc(id('pl'))}">editar a lista</button></div>`;
@@ -442,6 +461,12 @@ export function criarEtapas(ctx) {
     if (ec) ec.addEventListener('click', () => { gravar(I.remendoCancelarEnvio(atual()), `App: cancela o envio das respostas em "${titulo}"`); renderEdicao(); toast('Envio cancelado.'); });
     const es = el.querySelector('[data-envio-simula]');
     if (es) es.addEventListener('click', () => { gravar(I.exemploRespostas(atual()), 'App: resposta de exemplo (modo local) para "Enviar respostas"'); renderEdicao(); });
+    const tp = el.querySelector('[data-tipo]');
+    if (tp) tp.addEventListener('change', () => {
+      gravar(I.remendoTipo(tp.value), `App: tipo da peça de "${titulo}"${tp.value ? ': ' + tp.value : ' volta ao palpite'}`);
+      renderEdicao();
+      const n = el.querySelector('[data-tipo]'); if (n) n.focus();
+    });
     el.querySelectorAll('[data-manter]').forEach(b => b.addEventListener('click', () => {
       gravar(I.remendoManter(atual(), b.dataset.manter), `App: mantém ${I.FERRAMENTA[b.dataset.manter].nome.toLowerCase()} de "${titulo}" como está`);
       renderEdicao();
@@ -593,7 +618,7 @@ export function criarEtapas(ctx) {
       let k = 0;
       for (const c of P.COLUNAS) {
         const ts = i.plano[c.id].tarefas; if (!ts.length) continue;
-        h += `<span class="lab">${esc(c.nome)} · ${ts.length}</span><ol class="plano-l" start="${k + 1}">${ts.map(t => `<li>${linkar(t.texto)}</li>`).join('')}</ol>`;
+        h += `<span class="lab">${esc(c.nome)} · ${ts.length}</span><ol class="plano-l" start="${k + 1}">${ts.map(tarefaLi).join('')}</ol>`;
         k += ts.length;
       }
       h += `<small class="nota">Revisa aqui; quando estiver bom, “Mandar pro Kanban”.</small>`;

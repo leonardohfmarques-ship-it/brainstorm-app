@@ -189,3 +189,59 @@ test('pacote 3: pergunta dele fica marcada (minhas:) e "Mais perguntas" trava co
   assert.equal(I.ABERTAS_LIMITE, 3);
   assert.equal(I.semResposta(ler(t)), 2);
 });
+
+/* ---------- pacote 4: produto, projeto e celular ---------- */
+import * as P from '../js/plano.js';
+import { Store, mesmosTextos } from '../js/sync.js';
+
+test('pacote 4: tipo da peça, o dele vence o palpite do Claude', () => {
+  assert.equal(I.lerTipo('Produto.'), 'produto');
+  assert.equal(I.lerTipo('conteúdo'), 'conteudo');
+  assert.equal(I.lerTipo('sei lá'), '');
+  let it = I.lerItem('ideias/youtube/x/decididas/y/item.md', ITEM);
+  assert.deepEqual(it.tipo, { valor: '', de: '' });
+  assert.equal(I.nomeVar('Custo', it.tipo.valor), 'Custo');
+  let txt = aplicar(ITEM, { fm: { 'tipo-sugerido': 'produto' } });
+  it = I.lerItem('ideias/youtube/x/decididas/y/item.md', txt);
+  assert.deepEqual(it.tipo, { valor: 'produto', de: 'claude' });
+  assert.equal(I.nomeVar('Custo', it.tipo.valor), 'Custo e preço');
+  assert.equal(I.nomeVar('Prazo', it.tipo.valor), 'Prazo');
+  txt = aplicar(txt, I.remendoTipo('projeto'));
+  it = I.lerItem('ideias/youtube/x/decididas/y/item.md', txt);
+  assert.deepEqual(it.tipo, { valor: 'projeto', de: 'dele' });
+  assert.match(txt, /\ntipo: projeto\n/);
+  assert.match(txt, /\ntipo-sugerido: produto\n/);
+  // vazio no seletor: volta a valer o palpite
+  txt = aplicar(txt, I.remendoTipo(''));
+  assert.doesNotMatch(txt, /\ntipo: /);
+  assert.deepEqual(I.lerItem('ideias/youtube/x/decididas/y/item.md', txt).tipo, { valor: 'produto', de: 'claude' });
+  // o modo local também deixa um palpite
+  assert.equal(I.exemploRespostas(I.lerItem('ideias/youtube/x/decididas/y/item.md', ITEM)).fm['tipo-sugerido'], 'conteudo');
+});
+
+test('pacote 4: tarefa com título curto e detalhe embaixo', () => {
+  const col = P.lerTarefas('- Pedir orçamento a três fornecedores\n  Perguntar o preço por unidade.\n  - e o prazo\n- Testar no 1º dia');
+  assert.deepEqual(col.tarefas.map(t => t.texto), ['Pedir orçamento a três fornecedores', 'Testar no 1º dia']);
+  assert.deepEqual(P.detalhe(col.tarefas[0]), ['Perguntar o preço por unidade.', 'e o prazo']);
+  assert.deepEqual(P.detalhe(col.tarefas[1]), []);
+  // mover leva o detalhe junto
+  const p = P.mover({ afazer: col, fazendo: P.lerTarefas(''), feito: P.lerTarefas('') }, { col: 'afazer', i: 0 }, { col: 'feito', i: 0 });
+  assert.deepEqual(P.detalhe(p.feito.tarefas[0]), ['Perguntar o preço por unidade.', 'e o prazo']);
+});
+
+test('pacote 4: buscar de novo só redesenha quando algum texto mudou', async () => {
+  const arq = 'ideias/youtube/x/decididas/y/item.md';
+  let rev = 'a', texto = ITEM;
+  const b = { load: async () => ({ files: new Map([[arq, { text: texto, sha: rev }]]), anexos: [], rev, truncado: false }) };
+  const s = new Store(b); await s.carregar();
+  let avisos = 0; s.on(t => { if (t === 'remoto') avisos++; });
+  rev = 'b';  // commit novo (o vigia, o nosso envio) sem mudar o texto
+  assert.equal(await s.atualizar(), false);
+  assert.equal(s.rev, 'b');
+  assert.equal(s.files.get(arq).sha, 'b', 'o sha novo fica guardado para o próximo envio');
+  assert.equal(avisos, 0);
+  rev = 'c'; texto = ITEM.replace('Quem nunca tatuou.', 'Quem já tatuou.');  // o Claude respondeu
+  assert.equal(await s.atualizar(), true);
+  assert.equal(avisos, 1);
+  assert.equal(mesmosTextos(new Map([['a', { text: '1' }]]), new Map([['a', { text: '1' }], ['b', { text: '' }]])), false);
+});

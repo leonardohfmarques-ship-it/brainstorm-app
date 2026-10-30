@@ -29,6 +29,15 @@ export function mensagem(msgs) {
   return u.length === 1 ? u[0] : `${prim} (e mais ${u.length - 1})`;
 }
 
+// os arquivos de antes e os de agora têm os mesmos caminhos e os mesmos textos?
+export function mesmosTextos(antes, agora) {
+  if (!antes || !agora || antes.size !== agora.size) return false;
+  for (const [p, f] of agora) { const a = antes.get(p); if (!a || a.text !== f.text) return false; }
+  return true;
+}
+const chaves = m => m instanceof Map ? [...m.keys()] : Array.isArray(m) ? m.map(x => typeof x === 'string' ? x : JSON.stringify(x)) : Object.keys(m || {});
+const mesmasChaves = (a, b) => { const x = chaves(a).sort().join('\n'), y = chaves(b).sort().join('\n'); return x === y; };
+
 export class Store {
   constructor(backend) {
     this.b = backend;
@@ -68,8 +77,11 @@ export class Store {
     if (this.ocupado) return false;
     const r = await this.b.load();
     if (this.ocupado || r.rev === this.rev) return false;
+    // a revisão muda com qualquer commit (o vigia, o nosso próprio envio); só redesenha se algum texto mudou de fato
+    const igual = mesmosTextos(this.files, r.files) && mesmasChaves(this.anexos, r.anexos);
     this.files = new Map([...r.files].map(([p, f]) => [p, { text: f.text, remoto: f.text, sha: f.sha }]));
     this.anexos = r.anexos; this.rev = r.rev;
+    if (igual) return false;
     this.reconstruir(); this.emit('remoto');
     return true;
   }

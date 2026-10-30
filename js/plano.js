@@ -24,6 +24,9 @@ export function lerTarefas(md) {
   return out;
 }
 
+// as linhas de detalhe de uma tarefa (recuadas embaixo dela), sem o recuo nem o "- "
+export const detalhe = t => (t.extra || []).map(l => l.trim().replace(/^[-*+]\s+/, '')).filter(Boolean);
+
 const semFimVazio = l => { const a = l.slice(); while (a.length && !a[a.length - 1].trim()) a.pop(); return a; };
 const umaLinha = t => String(t == null ? '' : t).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
 

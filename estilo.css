@@ -821,3 +821,47 @@ textarea.var-in{display:block;width:100%;min-height:38px;border:2px solid var(--
 .pg-tua{display:inline-block;margin-left:6px;padding:2px 5px 1px;border:1.5px solid currentColor;border-radius:3px;font:500 9.5px/1.2 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--gray);vertical-align:2px}
 .fx-trava{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .fx-trava small{font:500 11px/1.2 var(--mono);color:var(--gray)}
+
+/* 30/10 · produto, projeto e celular */
+select.var-sel{min-height:38px;border:2px solid var(--ink);border-radius:8px;background:var(--paper);padding:6px 8px;font:500 15px/1.3 var(--sans);color:var(--ink);width:100%;min-width:0}
+.var--tipo.is-claude select.var-sel{border-style:dashed;background:color-mix(in srgb,var(--lap) 45%,var(--paper))}
+.plano-l .plano-x{display:block;margin:2px 0 4px;font:400 13px/1.35 var(--sans);color:var(--gray)}
+.et-lt{display:none}
+@media (max-width:768px){
+  /* a lista de itens recolhe numa linha quando há item aberto ("Trocar de item") */
+  .et-lista.tem-sel .et-lh{display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px;padding:10px 16px}
+  .et-lista.tem-sel .et-lh h2{font-size:20px}
+  .et-lista.tem-sel .et-lh p{margin:0;flex:1 1 auto}
+  .et-lista.tem-sel .et-lt{display:inline-flex;align-items:center;min-height:44px;padding:0 14px;border:2px solid var(--ink);border-radius:999px;background:var(--paper);font:500 13px/1 var(--sans);color:var(--ink);cursor:pointer}
+  .et-lista.tem-sel:not(.is-aberta) ul,.et-lista.tem-sel:not(.is-aberta) .et-gn{display:none}
+  .et-lista.tem-sel{padding:0}
+  /* contexto recolhido: só o título; o caminho aparece ao abrir */
+  details.fx-ctx:not([open]) .ctx-linha{display:none}
+  /* a linha dos passos fica deitada e curta: três estações numa linha, sem a explicação */
+  .rota{margin:12px 0 12px}
+  .rota ol{grid-template-columns:repeat(3,minmax(0,1fr));gap:0 6px}
+  .rota-p:not(:last-child)::after{left:28px;right:-6px;top:20px;bottom:auto;width:auto;height:4px;background:linear-gradient(90deg,var(--c) 55%,transparent 0) 0 0/14px 4px repeat-x}
+  .rota-p--pronto:not(:last-child)::after{background:var(--c)}
+  .rota-b{grid-template-columns:minmax(0,1fr);row-gap:6px;min-height:44px;padding:6px 4px 4px 0}
+  .rota-b .d{width:28px;height:28px;grid-row:auto}
+  .rota-b .n{font-size:12px;gap:5px}
+  .rota-b .k{width:16px;height:16px;font-size:10px}
+  .rota-b .s{display:none}
+  /* alvos de toque de pelo menos 44 px */
+  .mini{min-height:44px;padding:0 6px;display:inline-flex;align-items:center}
+  .pg-x{width:44px;height:44px;margin:-10px -12px -10px 0}
+  .btn,.btn--sm{min-height:44px}
+  .fx-h{min-height:44px}
+  select.var-sel{min-height:44px}
+  textarea.var-in{min-height:44px}
+  .et,.crumb,.sync{min-height:44px}
+  .sync{min-width:44px}
+  .etapa input:not([type=checkbox]):not([type=radio]){min-height:44px}
+  /* Kanban: os botões de mover ficam sempre à vista, grandes para o dedo */
+  .card-b{position:static;opacity:1;pointer-events:auto;border:0;background:none;justify-content:space-between;height:auto;margin:6px -8px 0;padding:0}
+  .card-b .sp{display:none}
+  .card-b button{width:44px;height:44px}
+  .col-add{min-height:44px}
+  .top-r{gap:6px}
+  .top-r .btn{padding:0 12px}
+}

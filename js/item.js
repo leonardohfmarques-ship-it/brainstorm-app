@@ -24,6 +24,14 @@ export const PEDIDOS = FERRAMENTAS.filter(f => f.pede).map(f => f.id).concat('re
 // cartões que dependem das respostas: ficam "desatualizados" quando ele envia respostas novas
 export const DEPENDEM = ['estrutura', 'riscos', 'comparar', 'versao', 'plano'];
 export const VARIAVEIS = ['Formato', 'Canal', 'Prazo', 'Ritmo', 'Custo', 'Material'];
+// tipo da peça (desde 30/10): "tipo:" é dele (o seletor grava); "tipo-sugerido:" é do Claude (Enviar respostas deduz)
+export const TIPOS = [{ id: 'conteudo', nome: 'conteúdo' }, { id: 'projeto', nome: 'projeto' }, { id: 'produto', nome: 'produto' }];
+export function lerTipo(v) {
+  const t = String(v == null ? '' : v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().match(/[a-z]+/g) || [];
+  return t.find(x => TIPOS.some(o => o.id === x)) || '';
+}
+// projeto e produto falam de preço: o campo "Custo" (a chave no arquivo continua "Custo") aparece como "Custo e preço"
+export const nomeVar = (k, tipo) => k === 'Custo' && (tipo === 'projeto' || tipo === 'produto') ? 'Custo e preço' : k;
 export const ESTADOS_ITEM = ['edicao', 'kanban', 'feita'];
 // os três passos da página do item, um aberto por vez (o caminho principal). Referências e Comparar ficam à parte
 export const PASSOS = [
@@ -237,6 +245,7 @@ export function lerItem(path, text) {
     entendido: ler(['Perguntas', ENTENDI]) || '',
     enviadas: String(f.enviadas == null ? '' : f.enviadas), enviando: String(f.enviando == null ? '' : f.enviando),
     desatualizado: lerLista(f.desatualizado, DEPENDEM), mantido: lerLista(f.mantido, DEPENDEM),
+    tipoDele: lerTipo(f.tipo), tipoSugerido: lerTipo(f['tipo-sugerido']),
     variaveis: vars.valores, varExtras: vars.extras, sugestoes: sug.valores, valem: valem(vars.valores, sug.valores),
     passo: lerPasso(f.passo),
     estrutura: ler(['Estrutura']) || '', riscos: ler(['Riscos']) || '', referencias: ler(['Referências']) || '',
@@ -245,6 +254,7 @@ export function lerItem(path, text) {
     temPlano: acharSecao(doc, ['Plano']) != null
   };
   o.rel = relDeOrigem(o.origem);
+  o.tipo = { valor: o.tipoDele || o.tipoSugerido, de: o.tipoDele ? 'dele' : o.tipoSugerido ? 'claude' : '' };
   return o;
 }
 
@@ -502,6 +512,8 @@ export function remendoManter(it, id) {
   const mant = it.mantido.filter(x => x !== id).concat(DEPENDEM.includes(id) ? [id] : []);
   return { fm: { desatualizado: resto.length ? resto.join(', ') : null, mantido: mant.length ? mant.join(', ') : null } };
 }
+// seletor do tipo: grava o dele; vazio volta a valer o sugerido pelo Claude
+export const remendoTipo = v => ({ fm: { tipo: lerTipo(v) || null } });
 // modo local: o que a Action faria (texto genérico de exemplo, nunca ideias dele)
 export function exemploRespostas(it) {
   const ex = exemplo('variaveis');
@@ -510,7 +522,7 @@ export function exemploRespostas(it) {
   const sec = { [SEC_ENTENDI]: 'Exemplo do modo local: tu quer algo curto e direto, para quem está começando.\nO foco mudou para mostrar o processo, não só o resultado.\nIsso puxa para um formato mais simples de gravar.' + (abertas.length ? '\nEm aberto: ' + abertas.join(' · ') : ''), ...ex.sec };
   if (!it.perguntas.some(p => /exemplo de seguimento/i.test(p.q))) sec[secao('Perguntas', 'Pergunta de exemplo de seguimento: o que muda se for em vídeo curto?')] = '';
   const mant = it.mantido.filter(f => !desat.includes(f));
-  return { fm: { pedido: comPedido(it.pedidos, 'respostas', false), enviando: null, enviadas: it.enviando || marcaDe(it), desatualizado: desat.length ? desat.join(', ') : null, mantido: mant.length ? mant.join(', ') : null }, sec };
+  return { fm: { pedido: comPedido(it.pedidos, 'respostas', false), enviando: null, enviadas: it.enviando || marcaDe(it), desatualizado: desat.length ? desat.join(', ') : null, mantido: mant.length ? mant.join(', ') : null, 'tipo-sugerido': 'conteudo' }, sec };
 }
 
 // respostas de exemplo do modo local (?local=1): só para testar a tela; textos genéricos, nunca ideias dele
