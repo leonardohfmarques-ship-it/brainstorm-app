@@ -153,7 +153,9 @@ export function criarEtapas(ctx) {
       // variáveis: "de novo" só depois de o Claude já ter sugerido (o que ele preencheu não conta)
       const pronto = f.id === 'variaveis' ? Object.keys(it.sugestoes).length > 0 : est(f.id) === 'pronto';
       const rot = pronto ? f.de_novo : f.pede;
-      const dica = f.id === 'variaveis' ? `${rot}: o Claude ${pronto ? 'troca só as sugestões dele' : 'sugere as seis'}; o que tu escreveste fica` : `${rot}: pede ao Claude, que usa tudo o que já está preenchido`;
+      const dica = f.id === 'variaveis' ? `${rot}: o Claude ${pronto ? 'troca só as sugestões dele' : 'sugere as seis'}; o que tu escreveste fica`
+        : f.id === 'perguntas' && pronto ? `${rot}: o Claude aprofunda as tuas respostas mais recentes (cada pergunta nova fica pendurada na resposta de onde veio)`
+        : `${rot}: pede ao Claude, que usa tudo o que já está preenchido`;
       return `<button class="btn btn--sm${pronto ? '' : ' btn--solid'}" data-pede="${f.id}" title="${esc(dica)}">${ICON.claude}${esc(rot)}</button>`;
     };
     // pronto, mas feito antes das últimas respostas enviadas: aviso discreto, ele decide se refaz
@@ -204,6 +206,31 @@ export function criarEtapas(ctx) {
       return `${b.intro ? `<div class="md">${md(b.intro, it.base, ctx.backend())}</div>` : ''}<div class="cmp">${b.blocos.map(x => `<article class="cmp-c${/^em resumo/i.test(x.titulo) ? ' is-resumo' : ''}"><b>${esc(x.titulo)}</b><div class="md">${md(x.texto, it.base, ctx.backend())}</div></article>`).join('')}</div>`;
     };
     const irmas = it.no && it.no.mae ? it.no.mae.direcoes.filter(d => d !== it.no) : it.no === it.ideia ? it.ideia.direcoes : [];
+    // perguntas em galho: a filha fica embaixo da mãe, recuada, ligada pela linha (o trilho de metrô da área).
+    // Trilhos: o da mãe desce do círculo dela; cada filha tem o cotovelo até o seu; quem tem irmã mais abaixo deixa
+    // o trilho seguir por ela (e pelas netas dela)
+    const ps = it.perguntas;
+    const temDepois = (a, k) => I.filhasDe(ps, a).some(j => j > k);
+    const trilhos = k => {
+      const p = ps[k]; let out = '';
+      for (let a = p.mae; a >= 0; a = ps[a].mae) {
+        const L = ps[a].nivel, segue = temDepois(a, k);
+        if (L === p.nivel - 1) out += `<i class="tr ${segue ? 'tr--segue' : 'tr--fim'}" style="--l:${L}"></i><i class="tr-h" style="--l:${L}"></i>`;
+        else if (segue) out += `<i class="tr tr--segue" style="--l:${L}"></i>`;
+      }
+      if (I.filhasDe(ps, k).length) out += `<i class="tr tr--desce" style="--l:${p.nivel}"></i>`;
+      return out;
+    };
+    const outroAprofundando = it.pedidos.includes('aprofundar');
+    const perguntaHTML = (p, k) => {
+      const filha = p.nivel > 1, emObras = I.aprofundando(it, k);
+      // o botão aparece quando ele responde (a página não redesenha enquanto ele digita)
+      const podeGalho = p.nivel < I.PROFUNDIDADE && I.filhasDe(ps, k).every(j => ps[j].r.trim());
+      const pe = emObras
+        ? `<div class="pg-pe pg-pe--obras" role="status"><span class="pg-ap-st">Claude aprofundando esta resposta…</span><button class="mini" data-aprofunda-cancela>cancelar</button>${local ? `<button class="mini" data-aprofunda-simula title="Só no modo local: escreve uma pergunta de exemplo">simular (modo local)</button>` : ''}</div>`
+        : podeGalho && !outroAprofundando ? `<div class="pg-pe"${p.r.trim() ? '' : ' hidden'} data-pe="${k}"><button class="mini pg-ap" data-aprofunda="${k}" title="O Claude faz 1 ou 2 perguntas que partem desta resposta">${I.SETA} aprofundar esta</button></div>` : '';
+      return `<li class="pg-n${p.nivel}${filha ? ' pg--filha' : ''}${p.r.trim() ? ' is-resp' : ''}" style="--n:${p.nivel}">${trilhos(k)}<label class="pg-q" for="pg-${k}">${filha ? `<span class="pg-seta" aria-label="nasceu da resposta de cima">${I.SETA}</span> ` : ''}${esc(p.q)}</label><button class="pg-x" data-exclui="${k}" aria-label="Excluir a pergunta: ${esc(p.q)}" title="${I.filhasDe(ps, k).length ? 'Não está alinhada: excluir com as que nasceram dela (dá para desfazer)' : 'Não está alinhada: excluir (dá para desfazer)'}">${ICON.x}</button><textarea class="notas pg-r" id="pg-${k}" data-resp="${k}" rows="2" placeholder="Tua resposta…">${esc(p.r)}</textarea>${pe}</li>`;
+    };
     const cartao = {
       perguntas() {
         const respondidas = it.perguntas.filter(p => p.r.trim()).length;
@@ -219,7 +246,7 @@ export function criarEtapas(ctx) {
             <div class="fx-wb"><button class="btn btn--sm" data-envio-cancela>${ICON.x}Cancelar envio</button>${local ? `<button class="btn btn--sm btn--ghost" data-envio-simula title="Só no modo local: escreve uma resposta de exemplo">Simular resposta (modo local)</button>` : ''}</div></div>`
           : (it.perguntas.length || it.rumo.trim() || it.entendido.trim()) ? `<div class="pg-envia" data-envia-bar>${envioHTML(I.novidades(it))}</div>` : '';
         const corpo = entendi + rumo + (it.perguntas.length
-          ? `<ol class="pergs">${it.perguntas.map((p, k) => `<li><label class="pg-q" for="pg-${k}">${esc(p.q)}</label><button class="pg-x" data-exclui="${k}" aria-label="Excluir a pergunta: ${esc(p.q)}" title="Não está alinhada: excluir (dá para desfazer)">${ICON.x}</button><textarea class="notas pg-r" id="pg-${k}" data-resp="${k}" rows="2" placeholder="Tua resposta…">${esc(p.r)}</textarea></li>`).join('')}</ol>`
+          ? `<ol class="pergs">${it.perguntas.map((p, k) => perguntaHTML(p, k)).join('')}</ol>`
           : (est('perguntas') === 'obras' ? '' : `<p class="empty">O Claude faz até 5 perguntas, só as que mudam a ideia (público, formato, o que a torna boa, como fecha). Tu respondes aqui mesmo; as respostas entram em tudo o que ele escrever depois.</p>`))
           + `<details class="pg-nova" data-pgnova${novaAberta ? ' open' : ''}><summary><span class="mini">+ Acrescentar uma pergunta minha</span></summary>
             <div class="pg-nova-b"><label class="lab" for="pg-nova-q">Pergunta</label><input id="pg-nova-q" data-nova-q autocomplete="off" placeholder="A pergunta que faltou">
@@ -338,7 +365,8 @@ export function criarEtapas(ctx) {
     const atualizarEnvio = () => { if (barra) barra.innerHTML = envioHTML(I.novidades(atual())); };
     el.querySelectorAll('[data-resp]').forEach(t => t.addEventListener('input', () => {
       const p = it.perguntas[+t.dataset.resp]; if (!p) return;
-      gravar(I.remendoResposta(p.q, t.value), `App: responde perguntas em "${titulo}"`);
+      gravar(I.remendoResposta(p.h, t.value), `App: responde perguntas em "${titulo}"`);
+      const pe = el.querySelector(`[data-pe="${t.dataset.resp}"]`); if (pe) pe.hidden = !t.value.trim();
       atualizarEnvio();
     }));
     // o rumo dele: grava como ele escreve (a bússola das ferramentas)
@@ -363,12 +391,14 @@ export function criarEtapas(ctx) {
     const curta = q => q.length > 48 ? q.slice(0, 47) + '…' : q;
     el.querySelectorAll('[data-exclui]').forEach(b => b.addEventListener('click', () => {
       const q0 = it.perguntas[+b.dataset.exclui]; if (!q0) return;
-      const j = atual(), k = j.perguntas.findIndex(x => x.q === q0.q), p = j.perguntas[k]; if (!p) return;
-      gravar(I.remendoExcluir(j, p.q), `App: descarta a pergunta "${curta(p.q)}" em "${titulo}"`);
+      const j = atual(), k = j.perguntas.findIndex(x => x.h === q0.h), p = j.perguntas[k]; if (!p) return;
+      // as filhas (e netas) saem junto: nasceram da resposta dela
+      const galho = I.galhoDe(j.perguntas, k).map(x => j.perguntas[x]), nf = galho.length - 1;
+      gravar(I.remendoExcluir(j, p.q), `App: descarta a pergunta "${curta(p.q)}"${nf ? ` e ${nf} de seguimento` : ''} em "${titulo}"`);
       renderEdicao();
-      toast(`Pergunta excluída: “${curta(p.q)}”`, { acao: 'Desfazer', ms: 8000, fn: () => {
+      toast(`Pergunta excluída${nf ? ` com ${nf === 1 ? 'a que nasceu dela' : `as ${nf} que nasceram dela`}` : ''}: “${curta(p.q)}”`, { acao: 'Desfazer', ms: 8000, fn: () => {
         const txt = st().texto(it.file); if (txt == null) return;
-        gravar(I.remendoVolta(txt, p, k), `App: desfaz descartar a pergunta "${curta(p.q)}" em "${titulo}"`);
+        gravar(I.remendoVolta(txt, galho, k), `App: desfaz descartar a pergunta "${curta(p.q)}" em "${titulo}"`);
         renderEdicao();
       } });
     }));
@@ -377,6 +407,24 @@ export function criarEtapas(ctx) {
       gravar(I.remendoTrazer(atual(), q), `App: traz de volta a pergunta "${curta(q)}" em "${titulo}"`);
       renderEdicao();
     }));
+    // "↳ aprofundar esta": o Claude faz 1 ou 2 perguntas que partem desta resposta (uma de cada vez)
+    el.querySelectorAll('[data-aprofunda]').forEach(b => b.addEventListener('click', () => {
+      const q0 = it.perguntas[+b.dataset.aprofunda]; if (!q0) return;
+      const j = atual(), k = j.perguntas.findIndex(x => x.h === q0.h); if (k < 0 || j.pedidos.includes('aprofundar')) return;
+      // a resposta acabou de ser escrita: o remendo dela vai antes, no mesmo envio
+      const r = I.remendoAprofundar(j, k); if (!r) return;
+      gravar(r, `App: pede ao Claude para aprofundar "${curta(q0.q)}" em "${titulo}"`);
+      renderEdicao(); ctx.renderNav();
+      toast(ctx.local() ? 'Pedido marcado (modo local: o Claude não roda aqui).' : 'Pedido enviado. Em 1 a 3 minutos a pergunta nova aparece embaixo desta.');
+    }));
+    const ac = el.querySelector('[data-aprofunda-cancela]');
+    if (ac) ac.addEventListener('click', () => { gravar(I.remendoCancelarAprofundar(atual()), `App: cancela o aprofundar em "${titulo}"`); renderEdicao(); toast('Pedido cancelado.'); });
+    const as = el.querySelector('[data-aprofunda-simula]');
+    if (as) as.addEventListener('click', () => {
+      const txt = st().texto(it.file); if (txt == null) return;
+      gravar(I.exemploAprofundar(txt, atual()), 'App: resposta de exemplo (modo local) para "aprofundar"');
+      renderEdicao();
+    });
     // pergunta dele, já com a resposta
     const nq = el.querySelector('[data-nova-q]'), nr = el.querySelector('[data-nova-r]');
     const novaOk = () => {

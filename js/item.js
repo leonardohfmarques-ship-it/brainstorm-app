@@ -2,7 +2,7 @@
 // ideias/<area>/<ideia>/decididas/<slug>/item.md (contrato em docs/FORMATO.md do repositório brainstorm).
 // Leva uma cópia congelada do caminho até ela (## Contexto) e as ferramentas para aprofundar antes do Kanban.
 // Funções puras: ler, montar o arquivo novo, pedidos, variáveis, perguntas e blocos.
-import { abrir, lerCampos, lerSecao, acharSecao, titulos, valorYaml, descer, secao } from './formato.js';
+import { abrir, lerCampos, lerSecao, acharSecao, titulos, valorYaml, descer, secao, aplicar as aplicarRemendo } from './formato.js';
 import { lerTarefas } from './plano.js';
 
 // as oito ferramentas, na ordem da página. "pede" = o Claude escreve (botão que marca o pedido no arquivo)
@@ -18,8 +18,9 @@ export const FERRAMENTAS = [
   { id: 'plano', nome: 'Plano', sec: 'Plano', pede: 'Gerar plano', de_novo: 'Refazer plano' }
 ];
 export const FERRAMENTA = Object.fromEntries(FERRAMENTAS.map(f => [f.id, f]));
-// "respostas" não é cartão: é o "Enviar respostas" do cartão Perguntas (o Claude lê e diz o que entendeu)
-export const PEDIDOS = FERRAMENTAS.filter(f => f.pede).map(f => f.id).concat('respostas');
+// "respostas" não é cartão: é o "Enviar respostas" do cartão Perguntas (o Claude lê e diz o que entendeu).
+// "aprofundar" é o "↳ aprofundar esta" de uma pergunta respondida (o código dela vai no campo "aprofundar:")
+export const PEDIDOS = FERRAMENTAS.filter(f => f.pede).map(f => f.id).concat('respostas', 'aprofundar');
 // cartões que dependem das respostas: ficam "desatualizados" quando ele envia respostas novas
 export const DEPENDEM = ['estrutura', 'riscos', 'comparar', 'versao', 'plano'];
 export const VARIAVEIS = ['Formato', 'Canal', 'Prazo', 'Ritmo', 'Custo', 'Material'];
@@ -96,6 +97,47 @@ export function novidades(it) {
   return { respostas, rumo, algo: respostas > 0 || rumo, nunca: m.rumo == null && !m.cods.size };
 }
 
+/* ---------------- perguntas em galho ----------------
+   Toda pergunta é um "###" de "## Perguntas"; a filha leva "↳" no começo, uma seta por nível abaixo da raiz
+   ("### ↳ Filha?", "### ↳↳ Neta?"), e fica logo depois da mãe e das filhas que a mãe já tinha. A mãe é a pergunta
+   anterior com um nível a menos. Item antigo (lista solta) = todas raízes. O sistema/ferramentas.py lê igual. */
+export const SETA = '↳';
+export const PROFUNDIDADE = 3;   // raiz, filha, neta: a neta não ganha filhas
+export const MAX_GALHO = 2;      // "↳ aprofundar esta" pede 1 ou 2 filhas
+export function nivelDe(titulo) {
+  const m = String(titulo == null ? '' : titulo).trim().match(/^((?:↳\s*)*)(.*)$/);
+  return { nivel: Math.min((m[1].match(/↳/g) || []).length + 1, PROFUNDIDADE), q: m[2].trim() };
+}
+export const tituloDe = (q, nivel) => (nivel > 1 ? SETA.repeat(nivel - 1) + ' ' : '') + q;
+// o código de uma pergunta (a mãe no "aprofundar:" e no prompt); igual ao ferramentas.py (codigo_pergunta)
+export const codigoPergunta = q => marca('pergunta\n' + umaLinha(q));
+// blocos "###" → [{ h (título no arquivo), q (sem as setas), r, nivel, mae (índice ou -1) }]
+export function arvore(bls) {
+  const out = [];
+  for (const b of bls) {
+    let { nivel, q } = nivelDe(b.titulo);
+    nivel = Math.min(nivel, out.length ? out[out.length - 1].nivel + 1 : 1); // sem mãe antes: sobe até achar
+    let mae = -1;
+    if (nivel > 1) for (let j = out.length - 1; j >= 0; j--) if (out[j].nivel === nivel - 1) { mae = j; break; }
+    out.push({ h: b.titulo, q, r: b.texto, nivel, mae });
+  }
+  return out;
+}
+export const filhasDe = (ps, k) => ps.map((p, j) => p.mae === k ? j : -1).filter(j => j >= 0);
+// o galho de k: ela e tudo o que nasceu dela (contíguo no arquivo) → [k, ..., último]
+export function galhoDe(ps, k) {
+  const out = [k];
+  for (let j = k + 1; j < ps.length && ps[j].nivel > ps[k].nivel; j++) out.push(j);
+  return out;
+}
+// respondida, acima do último nível e sem filha ainda sem resposta (o galho aberto espera por ele)
+export function podeAprofundar(it, k) {
+  const p = it.perguntas[k];
+  return !!p && !!p.r.trim() && p.nivel < PROFUNDIDADE && filhasDe(it.perguntas, k).every(j => it.perguntas[j].r.trim());
+}
+// a pergunta está pedida no "aprofundar:" (Claude escrevendo as filhas dela)?
+export const aprofundando = (it, k) => it.pedidos.includes('aprofundar') && !!it.perguntas[k] && it.aprofundar.includes(codigoPergunta(it.perguntas[k].q));
+
 /* ---------------- variáveis: "- Nome: valor" ---------------- */
 export function lerVariaveis(md) {
   const valores = {}, extras = [];
@@ -166,7 +208,8 @@ export function lerItem(path, text) {
     estado: ESTADOS_ITEM.includes(est) ? est : 'edicao', criado: String(f.criado || '').trim(),
     pedidos: lerPedidos(f.pedido),
     contexto: lerContexto(ler(['Contexto']) || ''),
-    perguntas: pergs.map(b => ({ q: b.titulo, r: b.texto })),
+    perguntas: arvore(pergs),
+    aprofundar: String(f.aprofundar == null ? '' : f.aprofundar).split(/\s+/).filter(c => /^[0-9a-f]{8}$/.test(c)),
     rumo: ler(['Perguntas', RUMO]) || '', descartadas: lerDescartadas(ler(['Perguntas', DESCARTADAS]) || ''),
     entendido: ler(['Perguntas', ENTENDI]) || '',
     enviadas: String(f.enviadas == null ? '' : f.enviadas), enviando: String(f.enviando == null ? '' : f.enviando),
@@ -270,7 +313,8 @@ ${escreverVariaveis({})}
 }
 
 /* ---------------- remendos das ferramentas (o que o app grava) ---------------- */
-export const remendoResposta = (q, texto) => ({ sec: { [secao('Perguntas', q)]: descer(texto, 4) } });
+// h = o título da pergunta no arquivo (com as setas, na filha)
+export const remendoResposta = (h, texto) => ({ sec: { [secao('Perguntas', h)]: descer(texto, 4) } });
 
 /* ----- perguntas: o rumo dele, excluir (vira descartada), desfazer, trazer de volta, pergunta dele ----- */
 // "### Descartadas" é uma lista "- pergunta", uma por linha
@@ -282,14 +326,28 @@ export function lerDescartadas(md) {
 const comDescartadas = l => l.length ? l.map(q => '- ' + umaLinha(q)).join('\n') : null; // lista vazia = some
 // o texto dele, como está (só os títulos descem para dentro da seção)
 export const remendoRumo = texto => ({ sec: { [SEC_RUMO]: descer(texto, 4) } });
+// excluir leva o galho junto (as filhas nasceram da resposta dela); todas viram descartadas, para não voltarem
 export function remendoExcluir(it, q) {
-  const d = it.descartadas.filter(x => norm(x) !== norm(q)).concat(umaLinha(q));
-  return { sec: { [secao('Perguntas', q)]: null, [SEC_DESCARTADAS]: comDescartadas(d) } };
+  const k = it.perguntas.findIndex(p => norm(p.q) === norm(q) || norm(p.h) === norm(q));
+  const ps = k >= 0 ? galhoDe(it.perguntas, k).map(j => it.perguntas[j]) : [{ h: q, q }];
+  const fora = ps.map(p => umaLinha(p.q));
+  const d = it.descartadas.filter(x => !fora.some(y => norm(y) === norm(x))).concat(fora);
+  const sec = {};
+  for (const p of ps) sec[secao('Perguntas', p.h || p.q)] = null;
+  sec[SEC_DESCARTADAS] = comDescartadas(d);
+  return { sec };
 }
-// Desfazer: a pergunta volta com a resposta, no lugar k (contando só perguntas), e sai das descartadas
+// a seção Perguntas remontada a partir dos blocos (intro + "### título" + texto)
+function montarPerguntas(intro, lista) {
+  return { sec: { Perguntas: [intro].concat(lista.map(x => x.titulo != null ? `### ${x.titulo}${x.texto ? '\n' + x.texto : ''}` : '')).filter(Boolean).join('\n\n') } };
+}
+// Desfazer: a pergunta volta com a resposta (e o galho dela, se veio junto), no lugar k (contando só perguntas), e
+// sai das descartadas. "p" é uma pergunta { h?, q, r } ou a lista do galho, na ordem do arquivo
 export function remendoVolta(text, p, k) {
+  const volta = [].concat(p).map(x => ({ titulo: x.h || x.q, texto: x.r, q: x.q }));
+  const tira = t => volta.some(v => norm(v.titulo) === norm(t));
   const b = blocos(lerSecao(abrir(text), ['Perguntas']) || '');
-  const lista = b.blocos.filter(x => norm(x.titulo) !== norm(p.q));
+  const lista = b.blocos.filter(x => !tira(x.titulo));
   let pos = lista.length, n = 0;
   for (let j = 0; j < lista.length; j++) {
     const t = lista[j].titulo;
@@ -297,13 +355,44 @@ export function remendoVolta(text, p, k) {
     if (reservada(t)) continue;
     if (n++ === k) { pos = j; break; }
   }
-  lista.splice(pos, 0, { titulo: p.q, texto: p.r });
-  const partes = lista.map(x => {
-    if (norm(x.titulo) !== norm(DESCARTADAS)) return `### ${x.titulo}${x.texto ? '\n' + x.texto : ''}`;
-    const d = comDescartadas(lerDescartadas(x.texto).filter(y => norm(y) !== norm(p.q)));
-    return d ? `### ${x.titulo}\n${d}` : '';
-  });
-  return { sec: { Perguntas: [b.intro].concat(partes).filter(Boolean).join('\n\n') } };
+  lista.splice(pos, 0, ...volta.map(v => ({ titulo: v.titulo, texto: v.texto })));
+  return montarPerguntas(b.intro, lista.map(x => {
+    if (norm(x.titulo) !== norm(DESCARTADAS)) return x;
+    const d = comDescartadas(lerDescartadas(x.texto).filter(y => !volta.some(v => norm(v.q) === norm(y))));
+    return d ? { titulo: x.titulo, texto: d } : {};
+  }));
+}
+
+/* ----- "↳ aprofundar esta": pede ao Claude 1 ou 2 perguntas que partem da resposta de k ----- */
+export function remendoAprofundar(it, k) {
+  const p = it.perguntas[k]; if (!p) return null;
+  const cods = it.aprofundar.filter(c => c !== codigoPergunta(p.q)).concat(codigoPergunta(p.q));
+  return { fm: { pedido: comPedido(it.pedidos, 'aprofundar'), aprofundar: cods.join(' ') } };
+}
+export const remendoCancelarAprofundar = it => ({ fm: { pedido: comPedido(it.pedidos, 'aprofundar', false), aprofundar: null } });
+// a filha entra logo depois do galho da mãe (no texto de agora): devolve o remendo da seção Perguntas
+export function remendoFilhas(text, maeQ, filhas) {
+  const b = blocos(lerSecao(abrir(text), ['Perguntas']) || '');
+  const ps = arvore(b.blocos.filter(x => !reservada(x.titulo)));
+  const k = ps.findIndex(p => norm(p.q) === norm(maeQ)); if (k < 0 || !filhas.length) return null;
+  const ultimo = ps[galhoDe(ps, k).pop()].h;
+  const j = b.blocos.findIndex(x => x.titulo === ultimo);
+  const lista = b.blocos.slice();
+  lista.splice(j + 1, 0, ...filhas.map(q => ({ titulo: tituloDe(umaLinha(q), ps[k].nivel + 1), texto: '' })));
+  return montarPerguntas(b.intro, lista);
+}
+// modo local: o que a Action faria no "aprofundar" (perguntas genéricas de exemplo, nunca ideias dele)
+export function exemploAprofundar(text, it) {
+  let t = text, n = it.perguntas.filter(p => /^Exemplo de seguimento \d+/.test(p.q)).length;
+  const maes = it.perguntas.filter((p, k) => it.aprofundar.includes(codigoPergunta(p.q)) && podeAprofundar(it, k));
+  let sec = {};
+  for (const m of maes) {
+    const r = remendoFilhas(t, m.q, [`Exemplo de seguimento ${++n}: o que isso muda na prática?`]);
+    if (!r) continue;
+    sec = r.sec;
+    t = aplicarRemendo(t, { sec: r.sec });
+  }
+  return { fm: { pedido: comPedido(it.pedidos, 'aprofundar', false), aprofundar: null }, sec };
 }
 // tirar das descartadas: a pergunta volta sem resposta, no fim da lista
 export function remendoTrazer(it, q) {

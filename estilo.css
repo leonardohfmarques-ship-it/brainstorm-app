@@ -688,6 +688,22 @@ details[open] > summary .fx-dobra::after{content:"fechar"}
 textarea.pg-r{min-height:48px;font-size:15px;padding:8px 10px;field-sizing:content;max-height:280px}
 .pergs li{grid-template-columns:28px minmax(0,1fr) auto}
 .pergs li .pg-r{grid-column:2 / span 2}
+/* perguntas em galho: a filha recuada embaixo da mãe, ligada pelo trilho da área (como o metrô) */
+.pergs li{position:relative;padding-left:calc((var(--n,1) - 1) * 26px)}
+.pergs li.pg--filha{counter-increment:none}
+.pergs li.pg--filha::before{content:"";width:16px;height:16px;border-width:4px;margin:4px 0 0 3px;background:var(--paper)}
+.pergs li.pg--filha.is-resp::before{background:var(--c)}
+.pergs .tr{position:absolute;left:calc((var(--l) - 1) * 26px + 9px);width:4px;top:-14px;bottom:0;background:var(--c);border-radius:2px;pointer-events:none}
+.pergs .tr--fim{bottom:auto;height:28px}
+.pergs .tr--desce{top:20px}
+.pergs .tr-h{position:absolute;left:calc((var(--l) - 1) * 26px + 9px);top:10px;width:22px;height:4px;background:var(--c);border-radius:2px;pointer-events:none}
+.pergs .pg--filha .pg-q{font-size:14.5px}
+.pg-seta{font:500 13px/1 var(--mono);color:var(--c)}
+.pg-pe{grid-column:2 / span 2;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.pg-pe[hidden]{display:none}
+.pg-ap{font-weight:500}
+.pg-pe--obras{padding:6px 10px;border:2px dashed var(--c);border-radius:8px}
+.pg-ap-st{font:400 12px/1.4 var(--mono);color:var(--ink)}
 .pg-x{width:26px;height:26px;margin:-3px -4px 0 0;display:grid;place-items:center;border:0;border-radius:6px;background:none;color:var(--gray);opacity:.5;cursor:pointer;padding:0}
 .pg-x svg{width:14px;height:14px}
 .pg-x:hover,.pg-x:focus-visible{opacity:1;color:var(--ink);background:rgba(17,17,17,.07)}
