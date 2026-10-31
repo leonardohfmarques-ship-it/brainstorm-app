@@ -66,7 +66,7 @@ test('aprofundar esta: pode só com resposta, abaixo de 3 níveis e sem filha ab
   const it = ler(ITEM);
   assert.deepEqual(it.perguntas.map((_, k) => I.podeAprofundar(it, k)), [true, true, false, true]);
   const r = I.remendoAprofundar(it, 3);
-  assert.deepEqual(r.fm, { pedido: 'aprofundar', aprofundar: I.codigoPergunta('Qual formato?') });
+  assert.deepEqual(r.fm, { pedido: 'aprofundar', aprofundar: I.codigoPergunta('Qual formato?'), falhou: null });
   const j = ler(aplicar(ITEM, r));
   assert.ok(I.aprofundando(j, 3) && !I.aprofundando(j, 0));
   assert.deepEqual(I.remendoCancelarAprofundar(j).fm, { pedido: null, aprofundar: null });

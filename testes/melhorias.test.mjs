@@ -120,7 +120,7 @@ test('pacote 3: excluir guarda pergunta, resposta e galho; trazer de volta devol
   const it = ler(GALHO);
   const ex = aplicar(GALHO, I.remendoExcluir(it, 'Quem assiste primeiro?'));
   assert.match(lerSecao(abrir(ex), ['Perguntas', 'Descartadas']),
-    /^- Quem assiste primeiro\?\n    > Quem nunca tatuou\.\n- ↳ Por que essa gente\?\n    > Têm medo\.\n    >\n    > E dúvida\.\n- ↳↳ Medo de quê\?\n    > Da dor\.$/);
+    /^- Quem assiste primeiro\?\n    <!-- lugar: depois=inicio nivel=1 -->\n    > Quem nunca tatuou\.\n- ↳ Por que essa gente\?\n    > Têm medo\.\n    >\n    > E dúvida\.\n- ↳↳ Medo de quê\?\n    > Da dor\.$/);
   const i1 = ler(ex);
   assert.deepEqual(i1.descartadas, ['Quem assiste primeiro?', 'Por que essa gente?', 'Medo de quê?']);
   assert.equal(i1.descartes.length, 1);
@@ -128,12 +128,13 @@ test('pacote 3: excluir guarda pergunta, resposta e galho; trazer de volta devol
   assert.equal(fechar(abrir(ex)), ex);
   // Desfazer devolve o arquivo exato
   assert.equal(aplicar(ex, I.remendoVolta(ex, I.galhoDe(it.perguntas, 0).map(k => it.perguntas[k]), 0)), GALHO);
-  // trazer de volta (depois do Desfazer acabar): o galho volta inteiro, com as respostas, no fim da lista
+  // trazer de volta (depois do Desfazer acabar): o galho volta inteiro, com as respostas, no lugar de onde saiu
   const tr = aplicar(ex, I.remendoTrazer(ex, 0));
   const i2 = ler(tr);
   assert.deepEqual(i2.perguntas.map(p => [p.h, p.r, p.nivel]), [
-    ['Qual é o prazo?', '', 1], ['Qual é o ritmo?', '', 1],
-    ['Quem assiste primeiro?', 'Quem nunca tatuou.', 1], ['↳ Por que essa gente?', 'Têm medo.\n\nE dúvida.', 2], ['↳↳ Medo de quê?', 'Da dor.', 3]]);
+    ['Quem assiste primeiro?', 'Quem nunca tatuou.', 1], ['↳ Por que essa gente?', 'Têm medo.\n\nE dúvida.', 2], ['↳↳ Medo de quê?', 'Da dor.', 3],
+    ['Qual é o prazo?', '', 1], ['Qual é o ritmo?', '', 1]]);
+  assert.equal(tr, GALHO);
   assert.deepEqual(i2.descartadas, []);
   assert.ok(!tr.includes('### Descartadas'));
   // excluir só a filha: guarda relativo a ela (vira raiz do grupo); o resto das descartadas não perde a resposta
@@ -170,9 +171,9 @@ test('pacote 3: apagar, excluir ou trazer de volta liga o Enviar (mesmos valores
   // mudar não é apagar
   const nv2 = I.novidades(ler(aplicar(t, I.remendoResposta('↳↳ Medo de quê?', 'Da agulha.'))));
   assert.deepEqual([nv2.respostas, nv2.tiradas], [1, 0]);
-  // excluir uma sem resposta também mexe nas descartadas
+  // excluir uma sem resposta mexe nas descartadas, mas não liga o Enviar (reteste de 30/10: nada do que o Claude leu mudou)
   const ex = aplicar(t, I.remendoExcluir(ler(t), 'Qual é o ritmo?'));
-  assert.deepEqual([I.novidades(ler(ex)).fora, I.novidades(ler(ex)).algo], [true, true]);
+  assert.deepEqual([I.novidades(ler(ex)).fora, I.novidades(ler(ex)).algo], [true, false]);
   // trazer de volta: volta ao que foi enviado
   assert.equal(I.novidades(ler(aplicar(ex, I.remendoTrazer(ex, 0)))).algo, false);
   // marca antiga (sem "fora="): as descartadas não contam

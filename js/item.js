@@ -122,7 +122,18 @@ export function novidades(it) {
   const tiradas = Math.max(0, sumiram - respostas);   // resposta mudada conta só como nova
   const rumo = m.rumo != null ? codigoRumo(it.rumo) !== m.rumo : !!it.rumo.trim();
   const fora = m.fora != null && codigoFora(it.descartadas) !== m.fora;
-  return { respostas, tiradas, rumo, fora, algo: respostas > 0 || sumiram > 0 || rumo || fora, nunca: m.rumo == null && !m.cods.size };
+  // descartadas mudadas sozinhas não ligam o Enviar (reteste de 30/10): excluir ou trazer de volta uma pergunta sem
+  // resposta não muda nada do que o Claude leu; com resposta, a conta das respostas (novas/tiradas) já pega
+  return { respostas, tiradas, rumo, fora, algo: respostas > 0 || sumiram > 0 || rumo, nunca: m.rumo == null && !m.cods.size };
+}
+// o rótulo do botão: "Enviar respostas · 2 novas · 1 apagada · descartadas mudaram · rumo mudou" (cada parte separada)
+export function rotuloEnvio(nv) {
+  const partes = [];
+  if (nv.respostas) partes.push(nv.respostas === 1 ? '1 nova' : `${nv.respostas} novas`);
+  if (nv.tiradas) partes.push(nv.tiradas === 1 ? '1 apagada' : `${nv.tiradas} apagadas`);
+  if (nv.algo && nv.fora && !nv.tiradas) partes.push('descartadas mudaram');
+  if (nv.rumo) partes.push('rumo mudou');
+  return ['Enviar respostas'].concat(partes).join(' · ');
 }
 
 /* ---------------- perguntas em galho ----------------
@@ -184,6 +195,13 @@ export function escreverVariaveis(valores, extras = []) {
 }
 // o valor que vale de cada variável: o dele, se ele escreveu; senão a sugestão do Claude (aceita sem ele confirmar).
 // Só se calcula ao ler: nada do Claude é gravado em "Decididas". O sistema/ferramentas.py faz a mesma conta (valem).
+// valor que não decide nada ("a decidir", "a combinar", "em aberto", "?"): não conta como preenchido (reteste de
+// 30/10: "6 de 6" sem nada decidido). Igual ao ferramentas.py (a_decidir)
+export function aDecidir(v) {
+  const t = norm(v).replace(/^[\s.:;,*_\-—–]+|[\s.:;,*_\-—–]+$/g, '');
+  return !t || t === '?' || t === '??' || /^(a decidir|a definir|a combinar|a ver|em aberto|indefinid|nao definid|sem definicao|tbd)\b/.test(t);
+}
+export const preenchidas = it => VARIAVEIS.filter(k => !aDecidir(it.valem[k].valor)).length;
 export function valem(dele = {}, sugestoes = {}) {
   const out = {};
   for (const k of VARIAVEIS) {
@@ -223,6 +241,7 @@ export function relDeOrigem(o) {
 }
 
 /* ---------------- ler o item ---------------- */
+const lerCodigos = v => String(v == null ? '' : v).split(/\s+/).filter(c => /^[0-9a-f]{8}$/.test(c));
 export function lerItem(path, text) {
   const doc = abrir(text);
   const f = lerCampos(doc);
@@ -238,13 +257,14 @@ export function lerItem(path, text) {
     pedidos: lerPedidos(f.pedido),
     contexto: lerContexto(ler(['Contexto']) || ''),
     perguntas: arvore(pergs),
-    aprofundar: String(f.aprofundar == null ? '' : f.aprofundar).split(/\s+/).filter(c => /^[0-9a-f]{8}$/.test(c)),
+    aprofundar: lerCodigos(f.aprofundar),
     rumo: ler(['Perguntas', RUMO]) || '', descartadas: lerDescartadas(ler(['Perguntas', DESCARTADAS]) || ''),
     descartes: lerDescartes(ler(['Perguntas', DESCARTADAS]) || ''),
-    minhas: String(f.minhas == null ? '' : f.minhas).split(/\s+/).filter(c => /^[0-9a-f]{8}$/.test(c)),
+    minhas: lerCodigos(f.minhas),
     entendido: ler(['Perguntas', ENTENDI]) || '',
     enviadas: String(f.enviadas == null ? '' : f.enviadas), enviando: String(f.enviando == null ? '' : f.enviando),
     desatualizado: lerLista(f.desatualizado, DEPENDEM), mantido: lerLista(f.mantido, DEPENDEM),
+    falhou: lerLista(f.falhou, PEDIDOS), conferir: lerCodigos(f.conferir),
     tipoDele: lerTipo(f.tipo), tipoSugerido: lerTipo(f['tipo-sugerido']),
     variaveis: vars.valores, varExtras: vars.extras, sugestoes: sug.valores, valem: valem(vars.valores, sug.valores),
     passo: lerPasso(f.passo),
@@ -370,7 +390,11 @@ export const remendoResposta = (h, texto) => ({ sec: { [secao('Perguntas', h)]: 
 //   - ↳ Filha que saiu junto?
 //       > resposta da filha
 // Um "grupo" é a pergunta sem seta e as com seta logo abaixo dela. Itens antigos (só títulos) leem igual.
+// Desde o reteste de 30/10 a primeira do grupo guarda o lugar de onde saiu, para o "trazer de volta" a pôr ali:
+//   - Pergunta excluída?
+//       <!-- lugar: depois=1a2b3c4d nivel=2 -->      (depois = código da pergunta de cima; "inicio" = era a primeira)
 const RESP_DESC = /^\s{2,}>\s?(.*)$/;
+const LUGAR = /^\s{2,}<!--\s*lugar:\s*depois=([0-9a-f]{8}|inicio)\s+nivel=(\d)\s*-->\s*$/;
 export function lerDescartes(md) {
   const grupos = []; let ult = null;
   for (const ln of String(md || '').split('\n')) {
@@ -383,6 +407,8 @@ export function lerDescartes(md) {
     }
     const r = ln.match(RESP_DESC);
     if (r && ult) ult.r.push(r[1]);
+    const l = ln.match(LUGAR);
+    if (l && ult) { ult.depois = l[1]; ult.nivelOrig = Math.min(+l[2] || 1, PROFUNDIDADE); }
   }
   return grupos.map(g => g.map(x => Object.assign(x, { r: x.r.join('\n').trim() })));
 }
@@ -392,6 +418,7 @@ export function escreverDescartes(grupos) {
   const linhas = [];
   for (const g of grupos) for (const x of g) {
     linhas.push('- ' + tituloDe(umaLinha(x.q), x.nivel || 1));
+    if (x.depois) linhas.push(`    <!-- lugar: depois=${x.depois} nivel=${x.nivelOrig || 1} -->`);
     if (String(x.r || '').trim()) for (const l of String(x.r).trim().split('\n')) linhas.push(l.trim() ? '    > ' + l : '    >');
   }
   return linhas.length ? linhas.join('\n') : null; // lista vazia = some
@@ -402,7 +429,8 @@ function semDescartes(grupos, qs) {
   return grupos.map(g => {
     const resto = g.filter(x => !fora(x.q)); if (!resto.length) return null;
     const sobe = resto[0].nivel - 1;
-    return resto.map(x => Object.assign({}, x, { nivel: Math.max(1, x.nivel - sobe) }));
+    // a cabeça mudou: o lugar guardado era o dela e não vale para a nova
+    return resto.map((x, j) => Object.assign({}, x, { nivel: Math.max(1, x.nivel - sobe) }, j === 0 && resto[0] !== g[0] ? { depois: undefined, nivelOrig: undefined } : {}));
   }).filter(Boolean);
 }
 // o texto dele, como está (só os títulos descem para dentro da seção)
@@ -414,6 +442,8 @@ export function remendoExcluir(it, q) {
   // o galho vai inteiro, com a resposta de cada uma e os níveis relativos à que foi excluída
   const base = ps[0].nivel || 1;
   const grupo = ps.map(p => ({ q: umaLinha(p.q), r: p.r || '', nivel: (p.nivel || 1) - base + 1 }));
+  // o lugar de onde saiu: a pergunta de cima (no arquivo) e o nível; o "trazer de volta" a põe ali de novo
+  if (k >= 0) Object.assign(grupo[0], { depois: k > 0 ? codigoPergunta(it.perguntas[k - 1].q) : 'inicio', nivelOrig: base });
   const d = semDescartes(it.descartes || [], grupo.map(x => x.q)).concat([grupo]);
   const sec = {};
   for (const p of ps) sec[secao('Perguntas', p.h || p.q)] = null;
@@ -449,8 +479,10 @@ export function remendoVolta(text, p, k) {
 /* ----- "↳ aprofundar esta": pede ao Claude 1 ou 2 perguntas que partem da resposta de k ----- */
 export function remendoAprofundar(it, k) {
   const p = it.perguntas[k]; if (!p) return null;
-  const cods = it.aprofundar.filter(c => c !== codigoPergunta(p.q)).concat(codigoPergunta(p.q));
-  return { fm: { pedido: comPedido(it.pedidos, 'aprofundar'), aprofundar: cods.join(' ') } };
+  // sem pedido aberto, os códigos que ficaram de um aprofundar que falhou não vão junto
+  const ja = it.pedidos.includes('aprofundar') ? it.aprofundar : [];
+  const cods = ja.filter(c => c !== codigoPergunta(p.q)).concat(codigoPergunta(p.q));
+  return { fm: { pedido: comPedido(it.pedidos, 'aprofundar'), aprofundar: cods.join(' '), falhou: semFalha(it, 'aprofundar') } };
 }
 export const remendoCancelarAprofundar = it => ({ fm: { pedido: comPedido(it.pedidos, 'aprofundar', false), aprofundar: null } });
 // a filha entra logo depois do galho da mãe (no texto de agora): devolve o remendo da seção Perguntas
@@ -477,17 +509,37 @@ export function exemploAprofundar(text, it) {
   }
   return { fm: { pedido: comPedido(it.pedidos, 'aprofundar', false), aprofundar: null }, sec };
 }
-// tirar das descartadas: o grupo k volta inteiro, como estava (pergunta, resposta e o galho que saiu junto), no fim
-// da lista (antes das Descartadas). A que já existe de novo nas perguntas não volta duplicada. "text" = o arquivo de agora
+// tirar das descartadas: o grupo k volta inteiro, como estava (pergunta, resposta e o galho que saiu junto), no lugar
+// de onde saiu (logo depois da pergunta que estava em cima dela, no mesmo nível). Sem o lugar guardado (descartada
+// antiga) ou se a de cima sumiu, volta no fim da lista (antes das Descartadas). A que já existe de novo nas perguntas
+// não volta duplicada. "text" = o arquivo de agora
 export function remendoTrazer(text, k) {
   const b = blocos(lerSecao(abrir(text), ['Perguntas']) || '');
   const dj = b.blocos.findIndex(x => norm(x.titulo) === norm(DESCARTADAS)); if (dj < 0) return null;
   const grupos = lerDescartes(b.blocos[dj].texto), g = grupos[k]; if (!g) return null;
-  const ja = arvore(b.blocos.filter(x => !reservada(x.titulo))).map(p => p.q);
+  const pergs = b.blocos.map((x, j) => ({ x, j })).filter(o => !reservada(o.x.titulo));
+  const ps = arvore(pergs.map(o => o.x));
+  const ja = ps.map(p => p.q);
   const volta = g.filter(x => !ja.some(q => norm(q) === norm(x.q)));
+  // onde entra: depois da de cima e das que vieram abaixo dela mais fundas que a que volta
+  let at = dj, sobe = 0;
+  const cab = g[0];
+  if (cab.depois && volta[0] === cab) {
+    const nivel = cab.nivelOrig || 1;
+    if (cab.depois === 'inicio') { at = pergs.length ? pergs[0].j : dj; sobe = nivel - 1; }
+    else {
+      const a = ps.findIndex(p => codigoPergunta(p.q) === cab.depois);
+      if (a >= 0 && nivel <= ps[a].nivel + 1) {
+        let e = a + 1; while (e < ps.length && ps[e].nivel > nivel) e++;
+        at = e < ps.length ? pergs[e].j : dj; sobe = nivel - 1;
+      }
+    }
+  }
   const lista = b.blocos.slice();
   const resto = escreverDescartes(grupos.filter((_, j) => j !== k));
-  lista.splice(dj, 1, ...volta.map(x => ({ titulo: tituloDe(x.q, x.nivel), texto: x.r })), ...(resto ? [{ titulo: b.blocos[dj].titulo, texto: resto }] : []));
+  const novos = volta.map(x => ({ titulo: tituloDe(x.q, Math.min(x.nivel + sobe, PROFUNDIDADE)), texto: x.r }));
+  if (resto) lista[dj] = { titulo: b.blocos[dj].titulo, texto: resto }; else lista.splice(dj, 1);
+  lista.splice(at, 0, ...novos);
   return montarPerguntas(b.intro, lista);
 }
 // pergunta dele, já com a resposta; devolve null se o nome não serve (vazio, repetido ou reservado)
@@ -503,7 +555,9 @@ export function remendoNova(it, q, r) {
 export const remendoVariaveis = (valores, extras) => ({ sec: { [SEC_DECIDIDAS]: escreverVariaveis(valores, extras) } });
 
 /* ----- enviar respostas: o pedido "respostas" leva junto a marca do que está indo ----- */
-export const remendoEnviar = it => ({ fm: { pedido: comPedido(it.pedidos, 'respostas'), enviando: marcaDe(it) } });
+export const remendoEnviar = it => ({ fm: { pedido: comPedido(it.pedidos, 'respostas'), enviando: marcaDe(it), falhou: semFalha(it, 'respostas') } });
+// pedir uma ferramenta (o botão do cartão): o aviso de que ela falhou sai
+export const remendoPedir = (it, id) => ({ fm: { pedido: comPedido(it.pedidos, id), falhou: semFalha(it, id) } });
 export const remendoCancelarEnvio = it => ({ fm: { pedido: comPedido(it.pedidos, 'respostas', false), enviando: null } });
 // "manter assim": tira o aviso de desatualizado de um cartão sem refazer e registra a escolha dele em "mantido:"
 // (não volta a avisar; um envio novo de respostas, que muda o que o cartão leu, avisa de novo)
@@ -514,6 +568,41 @@ export function remendoManter(it, id) {
 }
 // seletor do tipo: grava o dele; vazio volta a valer o sugerido pelo Claude
 export const remendoTipo = v => ({ fm: { tipo: lerTipo(v) || null } });
+
+/* ----- o Claude não respondeu (desde o reteste de 30/10) -----
+   A Action tenta 2 vezes; se nem assim vier resposta que sirva, marca "falhou: estrutura, riscos" e tira o pedido.
+   O app avisa ("O Claude não respondeu") com "Pedir de novo" (pede todas juntas) e "deixar assim" (tira o aviso). */
+export function semFalha(it, id) { const r = (it.falhou || []).filter(x => x !== id); return r.length ? r.join(', ') : null; }
+export function nomePedido(id) {
+  return id === 'respostas' ? 'ler tuas respostas' : id === 'aprofundar' ? 'aprofundar a pergunta' : (FERRAMENTA[id] || { nome: id }).nome;
+}
+export function remendoPedirDeNovo(it) {
+  // aprofundar só volta se o código da pergunta ficou guardado
+  const ids = it.falhou.filter(id => id !== 'aprofundar' || it.aprofundar.length);
+  let lista = it.pedidos.slice();
+  for (const id of ids) lista = lerPedidos(comPedido(lista, id));
+  const fm = { pedido: lista.length ? lista.join(', ') : null, falhou: null };
+  if (ids.includes('respostas')) fm.enviando = marcaDe(it);
+  if (!ids.includes('aprofundar') && it.falhou.includes('aprofundar')) fm.aprofundar = null;
+  return { fm };
+}
+export const remendoDeixarFalha = it => ({ fm: Object.assign({ falhou: null }, it.falhou.includes('aprofundar') && !it.pedidos.includes('aprofundar') ? { aprofundar: null } : {}) });
+
+/* ----- tarefas de antes de ele mudar de ideia (desde o reteste de 30/10) -----
+   Refazer o plano desatualizado deixa em Fazendo e Feito as que já andavam: a Action guarda o código delas em
+   "conferir:" e o Kanban mostra "do plano de antes" até ele dizer que ainda vale. Código igual ao ferramentas.py. */
+export const codigoTarefa = texto => marca('tarefa\n' + umaLinha(texto));
+export const aConferir = (it, t) => !!it.conferir && it.conferir.includes(codigoTarefa(t.texto));
+export function remendoVale(it, texto) {
+  const r = (it.conferir || []).filter(c => c !== (texto == null ? c : codigoTarefa(texto)));
+  return { fm: { conferir: r.length ? r.join(' ') : null } };
+}
+// modo local: o que a Action faz ao refazer o plano desatualizado
+export function conferirDepois(it) {
+  if (!it.desatualizado.includes('plano') && !it.mantido.includes('plano')) return it.conferir.length ? it.conferir.join(' ') : null;
+  const ja = ['fazendo', 'feito'].flatMap(c => it.plano[c].tarefas.map(x => codigoTarefa(x.texto)));
+  return ja.length ? ja.join(' ') : null;
+}
 // modo local: o que a Action faria (texto genérico de exemplo, nunca ideias dele)
 export function exemploRespostas(it) {
   const ex = exemplo('variaveis');
@@ -528,7 +617,7 @@ export function exemploRespostas(it) {
 // respostas de exemplo do modo local (?local=1): só para testar a tela; textos genéricos, nunca ideias dele
 export function exemplo(id) {
   return {
-    perguntas: { sec: { Perguntas: '### Quem tu queres que assista primeiro?\n\n### O que a pessoa leva no fim?\n\n### Qual é o gancho dos primeiros segundos?\n\n### O que só tu consegues mostrar aqui?\n\n### Onde isso pode dar errado?' } },
+    perguntas: { sec: { Perguntas: '### Quem tu quer que assista primeiro?\n\n### O que a pessoa leva no fim?\n\n### Qual é o gancho dos primeiros segundos?\n\n### O que só tu consegue mostrar aqui?\n\n### Onde isso pode dar errado?' } },
     variaveis: { sec: { [SEC_SUGESTOES]: '- Formato: vídeo de 10 minutos\n- Canal: YouTube\n- Prazo: primeiro em 2 semanas\n- Ritmo: 1 a cada 15 dias\n- Custo: só o tempo de gravar\n- Material: fotos de exemplo e câmera' } },
     estrutura: { sec: { Estrutura: '### 1. Gancho\nAbre com o exemplo mais forte.\n\n### 2. A regra\nDiz o que vai ser comparado.\n\n### 3. Os pares\nTrês pares, um de cada vez.\n\n### 4. Fecho\nPergunta para os comentários.' } },
     riscos: { sec: { Riscos: '- **Imagem de terceiros:** mostrar a fonte na tela.\n- **Ficar longo:** cortar cada par em 2 minutos.' } },

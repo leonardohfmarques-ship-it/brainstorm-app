@@ -71,3 +71,10 @@ export function criar(p, col, texto, i) {
 }
 export function editar(p, col, i, texto) { const o = copiar(p); if (o[col].tarefas[i]) o[col].tarefas[i].texto = umaLinha(texto); return o; }
 export function apagar(p, col, i) { const o = copiar(p); o[col].tarefas.splice(i, 1); return o; }
+
+// o aviso ao mandar pro Kanban: conta cada coluna (reteste de 30/10: dizia "14 em A fazer" com 2 já em Fazendo e Feito)
+export function avisoKanban(p) {
+  const n = c => p[c].tarefas.length, t = k => k === 1 ? '1 tarefa' : `${k} tarefas`;
+  const outras = [n('fazendo') ? `${n('fazendo')} em Fazendo` : '', n('feito') ? `${n('feito')} em Feito` : ''].filter(Boolean);
+  return `No Kanban: ${t(n('afazer'))} em A fazer${outras.length ? (outras.length === 2 ? `, ${outras[0]} e ${outras[1]}` : ` e ${outras[0]}`) : ''}.`;
+}

@@ -11,7 +11,8 @@ export const nomeEtapa = e => NOME[e] || e;
 export function criarEtapas(ctx) {
   const { esc, ICON, toast, linkar, fmtData, fmtDataBR, rebaixar, plural } = ctx;
   // tarefa do plano: título curto e, embaixo, as linhas de detalhe (desde 30/10)
-  const tarefaLi = t => { const d = P.detalhe(t); return `<li>${linkar(t.texto)}${d.length ? `<small class="plano-x">${linkar(d.join('\n'))}</small>` : ''}</li>`; };
+  // "velha" = veio do plano de antes de ele mudar de ideia (está em "conferir:")
+  const tarefaLi = (t, velha) => { const d = P.detalhe(t); return `<li>${linkar(t.texto)}${velha ? ' <span class="t-conf" title="Veio do plano de antes de tu mudar de ideia: confere se ainda vale">do plano de antes</span>' : ''}${d.length ? `<small class="plano-x">${linkar(d.join('\n'))}</small>` : ''}</li>`; };
   const UI = ctx.UI;
   const st = () => ctx.store();
   const M = () => st().model;
@@ -59,7 +60,7 @@ export function criarEtapas(ctx) {
   function campoHTML(id, texto, base, vazio, nota, ver) {
     if (campoAberto === id) {
       return `<textarea class="cru" data-campo="${esc(id)}" spellcheck="true" aria-label="Editar em markdown">${esc(texto)}</textarea>
-        <div class="cru-bar"><button class="btn btn--sm btn--solid" data-fecha="${esc(id)}">Pronto</button><small>${esc(nota || 'Salva sozinho enquanto escreves.')}</small></div>`;
+        <div class="cru-bar"><button class="btn btn--sm btn--solid" data-fecha="${esc(id)}">Pronto</button><small>${esc(nota || 'Salva sozinho enquanto tu escreve.')}</small></div>`;
     }
     return texto.trim()
       ? `<div class="campo-v" role="button" tabindex="0" data-abre="${esc(id)}" aria-label="Editar">${ver ? ver(texto) : `<div class="md">${md(texto, base, ctx.backend())}</div>`}</div>`
@@ -99,7 +100,7 @@ export function criarEtapas(ctx) {
     if (i && UI.ed !== i.key) { UI.ed = i.key; ctx.saveUI(); }
     const metaLista = x => {
       if (x.kind === 'item') {
-        const em = x.pedidos.length ? ' · Claude escrevendo' : '', v = I.velhos(x).length;
+        const em = x.pedidos.length ? ' · Claude escrevendo' : x.falhou.length ? ' · Claude não respondeu' : '', v = I.velhos(x).length;
         return `${x.codigo ? x.codigo + ' · ' : ''}${I.PASSO[x.passo].nome} · ${prontas(x)} de ${I.PRINCIPAIS.length} prontas${v ? ` · ${v} desatualizad${v === 1 ? 'o' : 'os'}` : ''}${em}`;
       }
       const n = P.total(x.plano);
@@ -122,14 +123,9 @@ export function criarEtapas(ctx) {
       return `<div class="pg-conf" role="alertdialog" aria-label="Perguntas sem resposta"><p><b>${esc(sem === 1 ? '1 sem resposta' : `${sem} sem resposta`)}, enviar assim?</b> O Claude trata ${sem === 1 ? 'essa' : 'essas'} como em aberto e não decide por ti.</p>
         <div class="fx-wb"><button class="btn btn--sm btn--solid" data-envia-sim>${ICON.claude}Enviar assim</button><button class="btn btn--sm btn--ghost" data-envia-nao>Responder antes</button></div></div>`;
     }
-    const partes = [];
-    if (nv.respostas) partes.push(nv.respostas === 1 ? '1 nova' : `${nv.respostas} novas`);
-    if (nv.tiradas) partes.push(nv.tiradas === 1 ? '1 apagada' : `${nv.tiradas} apagadas`);
-    if (nv.fora && !nv.tiradas) partes.push('descartadas mudaram');
-    if (nv.rumo) partes.push(partes.length ? 'e o rumo' : 'o rumo mudou');
     const dica = nv.algo ? `O Claude lê, diz o que entendeu e ajusta as sugestões. Não mexe no que tu escreveu.${sem ? ` ${sem === 1 ? '1 pergunta sem resposta fica' : `${sem} perguntas sem resposta ficam`} em aberto.` : ''}`
       : nv.nunca ? 'Responde pelo menos uma' : 'Nada novo desde o último envio';
-    return `<button class="btn btn--sm btn--solid" data-envia${nv.algo ? '' : ' disabled'} title="${esc(nv.algo ? 'Manda as respostas ao Claude para ele entender o novo direcionamento' : dica)}">${ICON.claude}Enviar respostas${partes.length ? ` · ${esc(partes.join(' '))}` : ''}</button><small class="nota">${esc(dica)}</small>`;
+    return `<button class="btn btn--sm btn--solid" data-envia${nv.algo ? '' : ' disabled'} title="${esc(nv.algo ? 'Manda as respostas ao Claude para ele entender o novo direcionamento' : dica)}">${ICON.claude}${esc(I.rotuloEnvio(nv))}</button><small class="nota">${esc(dica)}</small>`;
   }
 
   /* ----- item: cabeçalho, contexto herdado, a linha dos passos e os Extras -----
@@ -141,7 +137,7 @@ export function criarEtapas(ctx) {
   // o que fazer no passo aberto (embaixo do nome, na linha)
   const DICA = {
     aprofundar: 'Responde as perguntas e confere as variáveis',
-    montar: 'Pede a estrutura e os riscos, feitos com o que respondeste',
+    montar: 'Pede a estrutura e os riscos, feitos com o que tu respondeu',
     fechar: 'A versão final e o plano; depois, o Kanban'
   };
   const DEPOIS = { aprofundar: 'Depois: a estrutura e os riscos, com o que está aqui.', montar: 'Depois: a versão final e o plano de ação.' };
@@ -153,6 +149,7 @@ export function criarEtapas(ctx) {
   function curto(it, f) {
     const [nome, fim] = CURTO[f], e = I.estadoFerramenta(it, f);
     if (e === 'obras') return `${nome} em obras`;
+    if (e === 'vazio' && it.falhou.includes(f)) return `${nome} sem resposta`;
     return `${nome} ${e === 'vazio' ? 'vazi' : it.desatualizado.includes(f) ? 'desatualizad' : 'pront'}${fim}`;
   }
   // variáveis: o campo mostra o valor que vale (o dele ou, se ele não escreveu, o do Claude)
@@ -160,7 +157,8 @@ export function criarEtapas(ctx) {
     ? 'O que está no campo é o ponto de partida. “Palpite do Claude” é só palpite: a versão final e o plano tratam como a decidir, nunca como compromisso teu. Escreve por cima para decidir; se apagar o que escreveu, volta o palpite.'
     : 'Escreve as tuas ou pede ao Claude: o que ele sugerir entra como palpite, e tu decide escrevendo por cima.';
   const velhoTexto = it => { const v = I.fecharVelho(it); return v.length === 2 ? 'A versão final e o plano estão desatualizados' : v[0] === 'plano' ? 'O plano está desatualizado' : 'A versão final está desatualizada'; };
-  const contaVars = it => `${I.VARIAVEIS.filter(k => it.valem[k].valor).length} de ${I.VARIAVEIS.length}`;
+  // "a decidir" não conta como preenchida
+  const contaVars = it => `${I.preenchidas(it)} de ${I.VARIAVEIS.length}`;
 
   function renderItem(it, lado) {
     const a = AREA[it.area];
@@ -173,7 +171,7 @@ export function criarEtapas(ctx) {
     const F = I.FERRAMENTA;
     const passo = I.PASSO[it.passo], kp = I.PASSOS.indexOf(passo);
 
-    const obrasHTML = f => `<div class="wait fx-wait" role="status"><strong>Claude escrevendo…</strong><p>Leva de 1 a 3 minutos. Aparece aqui sozinho; podes mexer no resto.</p><div class="rail"><div class="runner"></div></div>
+    const obrasHTML = f => `<div class="wait fx-wait" role="status"><strong>Claude escrevendo…</strong><p>Leva de 1 a 3 minutos. Aparece aqui sozinho; dá para mexer no resto.</p><div class="rail"><div class="runner"></div></div>
       <div class="fx-wb"><button class="btn btn--sm" data-cancela="${f.id}">${ICON.x}Cancelar pedido</button>${local ? `<button class="btn btn--sm btn--ghost" data-simula="${f.id}" title="Só no modo local: escreve uma resposta de exemplo">Simular resposta (modo local)</button>` : ''}</div></div>`;
     const botao = f => {
       if (!f.pede || est(f.id) === 'obras') return '';
@@ -185,7 +183,7 @@ export function criarEtapas(ctx) {
       // variáveis: "de novo" só depois de o Claude já ter sugerido (o que ele preencheu não conta)
       const pronto = f.id === 'variaveis' ? Object.keys(it.sugestoes).length > 0 : est(f.id) === 'pronto';
       const rot = pronto ? f.de_novo : f.pede;
-      const dica = f.id === 'variaveis' ? `${rot}: o Claude ${pronto ? 'troca só as sugestões dele' : 'sugere as seis'}; o que tu escreveste fica`
+      const dica = f.id === 'variaveis' ? `${rot}: o Claude ${pronto ? 'troca só as sugestões dele' : 'sugere as seis'}; o que tu escreveu fica`
         : f.id === 'perguntas' && pronto ? `${rot}: o Claude aprofunda as tuas respostas mais recentes (cada pergunta nova fica pendurada na resposta de onde veio)`
         : `${rot}: pede ao Claude, que usa tudo o que já está preenchido`;
       return `<button class="btn btn--sm${pronto ? '' : ' btn--solid'}" data-pede="${f.id}" title="${esc(dica)}">${ICON.claude}${esc(rot)}</button>`;
@@ -221,6 +219,13 @@ export function criarEtapas(ctx) {
         return `<details class="ctx-n${ponta ? ' is-ponta' : ''}" data-niv="${k}"${aberto ? ' open' : ''}><summary><span class="r">${esc(c.rotulo || '')}</span><b>${esc(c.titulo)}</b><span class="mini fx-dobra" aria-hidden="true"></span></summary><div class="ctx-c">${fala}${notas}${lap}</div></details>`;
       }).join('') || '<p class="empty">Este item não tem contexto guardado.</p>'}</div></details>`;
 
+    // o Claude não respondeu (nem na 2ª tentativa da Action): aviso claro, com "Pedir de novo" para todas juntas
+    if (it.falhou.length) {
+      const nomes = it.falhou.map(I.nomePedido);
+      const lista = nomes.length > 1 ? nomes.slice(0, -1).join(', ') + ' e ' + nomes[nomes.length - 1] : nomes[0];
+      h += `<div class="fx-falhou" role="alert"><span class="lab">Sem resposta</span><p><b>O Claude não respondeu:</b> ${esc(lista)}. Pedir de novo costuma resolver.</p>
+        <div class="fx-wb"><button class="btn btn--sm btn--solid" data-falhou-pede>${ICON.claude}Pedir de novo</button><button class="mini" data-falhou-deixa title="Tira o aviso sem pedir">deixar assim</button></div></div>`;
+    }
     // a linha dos passos: o aberto mostra o que fazer; os recolhidos, o estado de cada cartão
     h += `<nav class="rota" aria-label="Passos do item"><ol>${I.PASSOS.map((p, k) => {
       const on = p === passo, e = I.estadoPasso(it, p.id);
@@ -239,6 +244,7 @@ export function criarEtapas(ctx) {
       if (!b.blocos.length) return `<div class="md">${md(txt, it.base, ctx.backend())}</div>`;
       return `${b.intro ? `<div class="md">${md(b.intro, it.base, ctx.backend())}</div>` : ''}<div class="cmp">${b.blocos.map(x => `<article class="cmp-c${/^em resumo/i.test(x.titulo) ? ' is-resumo' : ''}"><b>${esc(x.titulo)}</b><div class="md">${md(x.texto, it.base, ctx.backend())}</div></article>`).join('')}</div>`;
     };
+    const etapasTipo = it.tipo.valor === 'projeto' || it.tipo.valor === 'produto';
     const irmas = it.no && it.no.mae ? it.no.mae.direcoes.filter(d => d !== it.no) : it.no === it.ideia ? it.ideia.direcoes : [];
     // perguntas em galho: a filha fica embaixo da mãe, recuada, ligada pela linha (o trilho de metrô da área).
     // Trilhos: o da mãe desce do círculo dela; cada filha tem o cotovelo até o seu; quem tem irmã mais abaixo deixa
@@ -262,7 +268,7 @@ export function criarEtapas(ctx) {
       const podeGalho = p.nivel < I.PROFUNDIDADE && I.filhasDe(ps, k).every(j => ps[j].r.trim());
       const pe = emObras
         ? `<div class="pg-pe pg-pe--obras" role="status"><span class="pg-ap-st">Claude aprofundando esta resposta…</span><button class="mini" data-aprofunda-cancela>cancelar</button>${local ? `<button class="mini" data-aprofunda-simula title="Só no modo local: escreve uma pergunta de exemplo">simular (modo local)</button>` : ''}</div>`
-        : podeGalho && !outroAprofundando ? `<div class="pg-pe"${p.r.trim() ? '' : ' hidden'} data-pe="${k}"><button class="mini pg-ap" data-aprofunda="${k}" title="O Claude faz 1 ou 2 perguntas que partem desta resposta">${I.SETA} aprofundar esta</button></div>` : '';
+        : podeGalho && !outroAprofundando ? `<div class="pg-pe"${p.r.trim() ? '' : ' hidden'} data-pe="${k}"><button class="mini pg-ap" data-aprofunda="${k}" title="O Claude faz 1 ou 2 perguntas que partem desta resposta">${I.SETA} aprofundar esta</button><small class="pg-trava" hidden>com 3 sem resposta, responde as abertas primeiro</small></div>` : '';
       const tua = it.minhas.includes(I.codigoPergunta(p.q)) ? ` <span class="pg-tua" title="Pergunta tua: o Mais perguntas não a aprofunda sozinho">tua</span>` : '';
       return `<li class="pg-n${p.nivel}${filha ? ' pg--filha' : ''}${p.r.trim() ? ' is-resp' : ''}" style="--n:${p.nivel}">${trilhos(k)}<label class="pg-q" for="pg-${k}">${filha ? `<span class="pg-seta" aria-label="nasceu da resposta de cima">${I.SETA}</span> ` : ''}${esc(p.q)}${tua}</label><button class="pg-x" data-exclui="${k}" aria-label="Excluir a pergunta: ${esc(p.q)}" title="${I.filhasDe(ps, k).length ? 'Não está alinhada: excluir com as que nasceram dela (dá para desfazer)' : 'Não está alinhada: excluir (dá para desfazer)'}">${ICON.x}</button><textarea class="notas pg-r" id="pg-${k}" data-resp="${k}" rows="2" placeholder="Tua resposta…">${esc(p.r)}</textarea>${pe}</li>`;
     };
@@ -271,7 +277,7 @@ export function criarEtapas(ctx) {
         const respondidas = it.perguntas.filter(p => p.r.trim()).length;
         // o rumo dele (bússola de todas as ferramentas) fica no topo, sempre à vista
         const rumo = `<div class="pg-rumo"><label class="pg-rumo-l" for="pg-rumo">Para onde eu quero levar isto <span>nas minhas palavras</span></label>
-          <textarea class="notas pg-rumo-t" id="pg-rumo" data-rumo rows="2" placeholder="Escreve do teu jeito o que tu queres que isto vire, mesmo que nenhuma pergunta leve lá.">${esc(it.rumo)}</textarea>
+          <textarea class="notas pg-rumo-t" id="pg-rumo" data-rumo rows="2" placeholder="Escreve do teu jeito o que tu quer que isto vire, mesmo que nenhuma pergunta leve lá.">${esc(it.rumo)}</textarea>
           <small class="nota">É a bússola: Mais perguntas, Estrutura, Riscos, Versão final e Plano seguem isto. O Claude nunca reescreve.</small></div>`;
         // o que o Claude entendeu do último envio (3 a 5 linhas), no topo do cartão
         // a linha "Em aberto: …" (o que ele ainda não decidiu) sai do texto e fica à parte, embaixo
@@ -279,12 +285,12 @@ export function criarEtapas(ctx) {
         const entendi = it.entendido.trim() ? `<div class="pg-ent"><span class="lab">O que entendi <span>Claude · do último envio</span></span><div class="md">${md(ent.texto, it.base, ctx.backend())}</div>${ent.aberto ? `<p class="pg-aberto"><b>Em aberto</b>${esc(ent.aberto)}</p>` : ''}</div>` : '';
         const lendo = it.pedidos.includes('respostas');
         const envio = lendo
-          ? `<div class="wait fx-wait pg-lendo" role="status"><strong>Claude lendo tuas respostas…</strong><p>Leva de 1 a 3 minutos. Ele escreve o que entendeu aqui em cima e ajusta as sugestões; podes mexer no resto.</p><div class="rail"><div class="runner"></div></div>
+          ? `<div class="wait fx-wait pg-lendo" role="status"><strong>Claude lendo tuas respostas…</strong><p>Leva de 1 a 3 minutos. Ele escreve o que entendeu aqui em cima e ajusta as sugestões; dá para mexer no resto.</p><div class="rail"><div class="runner"></div></div>
             <div class="fx-wb"><button class="btn btn--sm" data-envio-cancela>${ICON.x}Cancelar envio</button>${local ? `<button class="btn btn--sm btn--ghost" data-envio-simula title="Só no modo local: escreve uma resposta de exemplo">Simular resposta (modo local)</button>` : ''}</div></div>`
           : (it.perguntas.length || it.rumo.trim() || it.entendido.trim()) ? `<div class="pg-envia" data-envia-bar>${envioHTML(I.novidades(it), I.semResposta(it))}</div>` : '';
         const corpo = entendi + rumo + (it.perguntas.length
           ? `<ol class="pergs">${it.perguntas.map((p, k) => perguntaHTML(p, k)).join('')}</ol>`
-          : (est('perguntas') === 'obras' ? '' : `<p class="empty">O Claude faz até 5 perguntas, só as que mudam a ideia (público, formato, o que a torna boa, como fecha). Tu respondes aqui mesmo; as respostas entram em tudo o que ele escrever depois.</p>`))
+          : (est('perguntas') === 'obras' ? '' : `<p class="empty">O Claude faz até 5 perguntas, só as que mudam a ideia (público, formato, o que a torna boa, como fecha). Tu responde aqui mesmo; as respostas entram em tudo o que ele escrever depois.</p>`))
           + `<details class="pg-nova" data-pgnova${novaAberta ? ' open' : ''}><summary><span class="mini">+ Acrescentar uma pergunta minha</span></summary>
             <div class="pg-nova-b"><label class="lab" for="pg-nova-q">Pergunta</label><input id="pg-nova-q" data-nova-q autocomplete="off" placeholder="A pergunta que faltou">
             <label class="lab" for="pg-nova-r">Resposta</label><textarea class="notas pg-r" id="pg-nova-r" data-nova-r rows="2" placeholder="A tua resposta"></textarea>
@@ -312,8 +318,9 @@ export function criarEtapas(ctx) {
         }).join('')}</div>${it.varExtras.length ? `<div class="md md-sm var-x">${md(it.varExtras.join('\n'), it.base, ctx.backend())}</div>` : ''}<small class="nota" data-varnota>${esc(notaVars(temSug))}</small>`;
         return card(F.variaveis, corpo, { extra: contaVars(it) });
       },
-      estrutura: () => card(F.estrutura, campoHTML(id('est'), it.estrutura, it.base, 'O Claude quebra a ideia em blocos (o roteiro). Ou escreve à mão.', 'Cada bloco começa com ### (ex.: ### 1. Gancho).', estruturaVer)),
-      riscos: () => card(F.riscos, campoHTML(id('ris'), it.riscos, it.base, 'O que pode dar errado e como evitar. O Claude lista; tu ajustas.', 'Uma linha por risco.')),
+      // projeto e produto não têm roteiro: são etapas de fazer e entregar
+      estrutura: () => card(F.estrutura, campoHTML(id('est'), it.estrutura, it.base, etapasTipo ? 'O Claude quebra em etapas, do começo à entrega. Ou escreve à mão.' : 'O Claude quebra a ideia em blocos (o roteiro). Ou escreve à mão.', etapasTipo ? 'Cada etapa começa com ### (ex.: ### 1. Protótipo).' : 'Cada bloco começa com ### (ex.: ### 1. Gancho).', estruturaVer)),
+      riscos: () => card(F.riscos, campoHTML(id('ris'), it.riscos, it.base, 'O que pode dar errado e como evitar. O Claude lista; tu ajusta.', 'Uma linha por risco.')),
       versao: () => card(F.versao, campoHTML(id('ver'), it.versao, it.base, 'Texto curto e fechado: o que vai ser feito. O Claude escreve com tudo acima.', 'Títulos aqui começam com ###.')),
       plano() {
         let plano = '';
@@ -321,7 +328,7 @@ export function criarEtapas(ctx) {
           let k0 = 0;
           for (const c of P.COLUNAS) {
             const ts = it.plano[c.id].tarefas; if (!ts.length) continue;
-            plano += `<span class="lab">${esc(c.nome)} · ${ts.length}</span><ol class="plano-l" start="${k0 + 1}">${ts.map(tarefaLi).join('')}</ol>`;
+            plano += `<span class="lab">${esc(c.nome)} · ${ts.length}</span><ol class="plano-l" start="${k0 + 1}">${ts.map(x => tarefaLi(x, c.id !== 'afazer' && I.aConferir(it, x))).join('')}</ol>`;
             k0 += ts.length;
           }
           plano += `<div class="fx-wb"><button class="mini" data-abre="${esc(id('pl'))}">editar a lista</button></div>`;
@@ -331,7 +338,7 @@ export function criarEtapas(ctx) {
       },
       referencias: () => card(F.referencias, `<div class="ref-add"><input data-ref placeholder="Cola um link (ou link de imagem) e Enter" aria-label="Novo link de referência" autocomplete="off"></div>`
         + campoHTML(id('ref'), it.referencias, it.base, 'Links, nomes, notas. Imagem: cola o link dela.', 'Imagem: ![](link da imagem).')),
-      comparar: () => !irmas.length && !it.comparar.trim() ? card(F.comparar, `<p class="empty">Não há direções irmãs para comparar: esta é a única opção do seu nível no mapa.</p>`) : card(F.comparar, (irmas.length && !it.comparar.trim() ? `<p class="empty">Irmãs: ${irmas.map(d => esc(d.titulo)).join(' · ')}</p>` : '')
+      comparar: () => !irmas.length && !it.comparar.trim() ? card(F.comparar, `<p class="empty">Não há direções irmãs para comparar: esta é a única opção deste nível no mapa.</p>`) : card(F.comparar, (irmas.length && !it.comparar.trim() ? `<p class="empty">Irmãs: ${irmas.map(d => esc(d.titulo)).join(' · ')}</p>` : '')
         + campoHTML(id('cmp'), it.comparar, it.base, 'O Claude põe as direções irmãs lado a lado e diz o que vale puxar delas.', 'Cada irmã começa com ###.', compararVer))
     };
 
@@ -403,11 +410,21 @@ export function criarEtapas(ctx) {
     // pedidos ao Claude (a automação do GitHub responde; o cartão fica "em obras" até lá)
     el.querySelectorAll('[data-pede]').forEach(b => b.addEventListener('click', () => {
       const f = I.FERRAMENTA[b.dataset.pede];
-      gravar({ fm: { pedido: I.comPedido(it.pedidos, f.id) } }, `App: pede ao Claude "${f.pede}" em "${titulo}"`);
+      gravar(I.remendoPedir(atual(), f.id), `App: pede ao Claude "${f.pede}" em "${titulo}"`);
       if (f.id === 'comparar') extrasAberto = true;
       renderEdicao(); ctx.renderNav();
       toast(ctx.local() ? 'Pedido marcado (modo local: o Claude não roda aqui).' : 'Pedido enviado. Em 1 a 3 minutos aparece aqui.');
     }));
+    // o Claude não respondeu: pede de novo tudo o que falhou (num envio só), ou tira o aviso
+    const fp = el.querySelector('[data-falhou-pede]');
+    if (fp) fp.addEventListener('click', () => {
+      const j = atual();
+      gravar(I.remendoPedirDeNovo(j), `App: pede ao Claude de novo (${j.falhou.join(', ')}) em "${titulo}"`);
+      renderEdicao(); ctx.renderNav();
+      toast(ctx.local() ? 'Pedido marcado (modo local: o Claude não roda aqui).' : 'Pedido de novo. Em 1 a 3 minutos aparece aqui.');
+    });
+    const fd = el.querySelector('[data-falhou-deixa]');
+    if (fd) fd.addEventListener('click', () => { gravar(I.remendoDeixarFalha(atual()), `App: tira o aviso de sem resposta em "${titulo}"`); renderEdicao(); });
     el.querySelectorAll('[data-cancela]').forEach(b => b.addEventListener('click', () => {
       const f = I.FERRAMENTA[b.dataset.cancela];
       gravar({ fm: { pedido: I.comPedido(it.pedidos, f.id, false) } }, `App: cancela o pedido "${f.pede}" em "${titulo}"`);
@@ -417,7 +434,9 @@ export function criarEtapas(ctx) {
       const f = I.FERRAMENTA[b.dataset.simula], ex = I.exemplo(f.id); if (!ex) return;
       // como a Action: refeito, deixa de estar desatualizado
       const j = atual(), des = j.desatualizado.filter(x => x !== f.id), man = j.mantido.filter(x => x !== f.id);
-      gravar(Object.assign({ fm: { pedido: I.comPedido(j.pedidos, f.id, false), desatualizado: des.length ? des.join(', ') : null, mantido: man.length ? man.join(', ') : null } }, ex), `App: resposta de exemplo (modo local) para "${f.pede}"`);
+      const fm = { pedido: I.comPedido(j.pedidos, f.id, false), desatualizado: des.length ? des.join(', ') : null, mantido: man.length ? man.join(', ') : null, falhou: I.semFalha(j, f.id) };
+      if (f.id === 'plano') fm.conferir = I.conferirDepois(j);   // como a Action: as que andavam antes de ele mudar de ideia
+      gravar(Object.assign({ fm }, ex), `App: resposta de exemplo (modo local) para "${f.pede}"`);
       renderEdicao();
     }));
     // respostas: cada pergunta guarda a resposta embaixo dela
@@ -429,11 +448,21 @@ export function criarEtapas(ctx) {
       const p = it.perguntas[+t.dataset.resp]; if (!p) return;
       gravar(I.remendoResposta(p.h, t.value), `App: responde perguntas em "${titulo}"`);
       const pe = el.querySelector(`[data-pe="${t.dataset.resp}"]`); if (pe) pe.hidden = !t.value.trim();
+      travaGalhos();
       // "X de Y respondidas" acompanha enquanto ele escreve
       const c = el.querySelector('[data-extra="perguntas"]'), j = atual();
       if (c) c.textContent = `${j.perguntas.filter(x => x.r.trim()).length} de ${j.perguntas.length} respondidas`;
       atualizarEnvio();
     }));
+    // "↳ aprofundar esta" com 3 perguntas sem resposta: desligado (a pergunta nova passaria do limite de abertas)
+    function travaGalhos() {
+      const cheio = I.semResposta(atual()) >= I.ABERTAS_LIMITE;
+      el.querySelectorAll('[data-pe]').forEach(pe => {
+        const b = pe.querySelector('[data-aprofunda]'), s = pe.querySelector('.pg-trava');
+        if (b) b.disabled = cheio; if (s) s.hidden = !cheio;
+      });
+    }
+    travaGalhos();
     // o rumo dele: grava como ele escreve (a bússola das ferramentas)
     const rumo = el.querySelector('[data-rumo]');
     if (rumo) rumo.addEventListener('input', () => { gravar(I.remendoRumo(rumo.value), `App: para onde quer levar "${titulo}"`); atualizarEnvio(); });
@@ -498,7 +527,7 @@ export function criarEtapas(ctx) {
     // "↳ aprofundar esta": o Claude faz 1 ou 2 perguntas que partem desta resposta (uma de cada vez)
     el.querySelectorAll('[data-aprofunda]').forEach(b => b.addEventListener('click', () => {
       const q0 = it.perguntas[+b.dataset.aprofunda]; if (!q0) return;
-      const j = atual(), k = j.perguntas.findIndex(x => x.h === q0.h); if (k < 0 || j.pedidos.includes('aprofundar')) return;
+      const j = atual(), k = j.perguntas.findIndex(x => x.h === q0.h); if (k < 0 || j.pedidos.includes('aprofundar') || I.semResposta(j) >= I.ABERTAS_LIMITE) return;
       // a resposta acabou de ser escrita: o remendo dela vai antes, no mesmo envio
       const r = I.remendoAprofundar(j, k); if (!r) return;
       gravar(r, `App: pede ao Claude para aprofundar "${curta(q0.q)}" em "${titulo}"`);
@@ -598,7 +627,7 @@ export function criarEtapas(ctx) {
         <button class="btn btn--sm btn--solid" data-act="kanban"${n ? '' : ' disabled'} title="${n ? 'As tarefas entram em A fazer' : 'Primeiro o plano: ele nasce no chat'}">${ICON.kanban}Mandar pro Kanban</button>
       </div></header>`;
     h += `<div class="aviso aviso--antiga" role="note"><span class="lab">Jeito antigo · a ideia inteira</span>
-      <p>Agora tu decides <b>uma direção de cada vez</b>: no mapa, cada direção tem “Decidir → Edição”, e ela chega aqui com o caminho até ela e as ferramentas novas.</p>
+      <p>Agora tu decide <b>uma direção de cada vez</b>: no mapa, cada direção tem “Decidir → Edição”, e ela chega aqui com o caminho até ela e as ferramentas novas.</p>
       <div class="cmd"><button class="btn btn--sm btn--solid" data-act="voltar-bs">${ICON.back}Voltar ao mapa e decidir uma ponta</button><button class="btn btn--sm" data-act="converter">Usar as ferramentas com a ideia inteira</button></div>
       <small>Nada se perde: escolhas, versão final e plano vão junto para o item novo.</small></div>`;
     if (!escolhas.trim()) {
@@ -618,7 +647,7 @@ export function criarEtapas(ctx) {
       let k = 0;
       for (const c of P.COLUNAS) {
         const ts = i.plano[c.id].tarefas; if (!ts.length) continue;
-        h += `<span class="lab">${esc(c.nome)} · ${ts.length}</span><ol class="plano-l" start="${k + 1}">${ts.map(tarefaLi).join('')}</ol>`;
+        h += `<span class="lab">${esc(c.nome)} · ${ts.length}</span><ol class="plano-l" start="${k + 1}">${ts.map(x => tarefaLi(x)).join('')}</ol>`;
         k += ts.length;
       }
       h += `<small class="nota">Revisa aqui; quando estiver bom, “Mandar pro Kanban”.</small>`;
@@ -630,7 +659,7 @@ export function criarEtapas(ctx) {
     const fala = i.fala;
     h += `<span class="lab">Fala${fala.data ? ' · ' + esc(fmtDataBR(fala.data)) : ''}</span>`;
     h += fala.falas.length ? fala.falas.map(t => `<blockquote class="fala sm-ed">${linkar(t)}</blockquote>`).join('') : `<p class="empty" style="color:var(--gray)">Sem fala registrada.</p>`;
-    h += `<span class="lab">Tuas anotações</span>` + campoHTML(id('notas'), i.anotacoes, i.base, 'Escreve aqui. Só tu mexes neste campo.', 'Só tu mexes neste campo.');
+    h += `<span class="lab">Tuas anotações</span>` + campoHTML(id('notas'), i.anotacoes, i.base, 'Escreve aqui. Só tu mexe neste campo.', 'Só tu mexe neste campo.');
     h += `</div></section>`;
     if (i.lapidado.trim()) h += `<details class="layer lap dobra"><summary class="layer-h"><b>Lapidado</b><span>do Claude</span><span class="sp"></span><span class="mini">abrir</span></summary><div class="layer-b"><div class="md">${md(i.lapidado, i.base, ctx.backend())}</div></div></details>`;
     h += `<section class="layer dirs" aria-labelledby="lDi"><header class="layer-h"><b id="lDi">Direções</b><span>${i.direcoes.length ? plural(i.direcoes.length, 'restou', 'restaram') : 'nenhuma'}</span></header><div class="layer-b">`;
@@ -697,6 +726,10 @@ export function criarEtapas(ctx) {
     const kbVelho = i.kind === 'item' ? I.fecharVelho(i) : [];
     if (kbVelho.length) h += `<div class="kb-velho" role="note"><span class="lab">Desatualizado</span><p>${esc(velhoTexto(i))}: as respostas mudaram depois. As tarefas podem não valer mais.</p><button class="btn btn--sm" data-act="voltar-ed">${ICON.back}Voltar para a Edição e refazer</button></div>`;
     if (kbVelho.length && confirmaFim === i.key && !feita) h += `<div class="fim-conf" role="alertdialog" aria-label="Concluir com plano desatualizado"><p><b>${esc(velhoTexto(i))}.</b> Concluir assim mesmo?</p><div class="fx-wb"><button class="btn btn--sm btn--solid" data-act="concluir-sim">${ICON.check}Concluir assim</button><button class="btn btn--sm btn--ghost" data-act="concluir-nao">Agora não</button></div></div>`;
+    // ele mudou de ideia e o plano foi refeito: as que já andavam vieram do plano de antes (confere se ainda valem)
+    const velha = (c, t) => i.kind === 'item' && c !== 'afazer' && I.aConferir(i, t);
+    const nConf = ['fazendo', 'feito'].reduce((s, c) => s + plano[c].tarefas.filter(t => velha(c, t)).length, 0);
+    if (nConf) h += `<div class="kb-velho kb-conf" role="note"><span class="lab">Confere</span><p>${nConf === 1 ? '1 tarefa em Fazendo ou Feito veio' : `${nConf} tarefas em Fazendo e Feito vieram`} do plano de antes de tu mudar de ideia. Vê se ainda ${nConf === 1 ? 'faz' : 'fazem'} sentido.</p><button class="btn btn--sm" data-act="vale-todas">${ICON.check}${nConf === 1 ? 'Ainda vale' : 'Todas ainda valem'}</button></div>`;
     h += `<div class="board" id="board">`;
     P.COLUNAS.forEach((c, ci) => {
       const ts = plano[c.id].tarefas;
@@ -709,7 +742,7 @@ export function criarEtapas(ctx) {
         h += `<li class="card${ed ? ' is-ed' : ''}" tabindex="0" data-col="${c.id}" data-i="${k}" aria-label="${esc(t.texto)}. ${esc(c.nome)}, ${k + 1} de ${ts.length}. Alt e setas movem, Enter edita, Delete apaga.">
           <span class="card-d" aria-hidden="true"></span><div class="card-c">`
           + (ed ? `<textarea class="card-in" data-edita aria-label="Texto da tarefa" maxlength="300">${esc(t.texto)}</textarea>`
-                : `<div class="card-t">${linkar(t.texto)}</div>${extra ? `<div class="card-x">${linkar(extra)}</div>` : ''}`)
+                : `<div class="card-t">${linkar(t.texto)}</div>${extra ? `<div class="card-x">${linkar(extra)}</div>` : ''}${velha(c.id, t) ? `<div class="card-conf"><span>do plano de antes</span><button class="mini" data-vale title="Tira a marca: esta tarefa continua valendo">ainda vale</button></div>` : ''}`)
           + `<div class="card-b" role="toolbar" aria-label="Tarefa">
               <button data-k="esq"${ci === 0 ? ' disabled' : ''} aria-label="Mover para ${esc(ci ? P.COLUNAS[ci - 1].nome : '')}" title="Coluna anterior (Alt ←)">${ICON.esq}</button>
               <button data-k="cima"${k === 0 ? ' disabled' : ''} aria-label="Subir" title="Subir (Alt ↑)">${ICON.cima}</button>
@@ -738,6 +771,7 @@ export function criarEtapas(ctx) {
       if (act === 'concluir-sim' && n && feitos === n) { confirmaFim = null; ctx.mudarEstado(i, 'feita'); }
       if (act === 'concluir-nao') { confirmaFim = null; renderKanban(); }
       if (act === 'reabrir') ctx.mudarEstado(i, 'kanban');
+      if (act === 'vale-todas') { st().remendar(i.file, I.remendoVale(i, null), `App: as tarefas de antes ainda valem em "${i.titulo}"`); renderKanban(); }
     }));
     ligarQuadro(i);
     // foco depois de mover / criar / editar
@@ -787,6 +821,12 @@ export function criarEtapas(ctx) {
     const board = el.querySelector('#board'); if (!board) return;
     // botões do cartão
     board.addEventListener('click', e => {
+      const vale = e.target.closest('[data-vale]');
+      if (vale) {
+        const card = vale.closest('.card'), t = i.plano[card.dataset.col].tarefas[+card.dataset.i];
+        if (t) { st().remendar(i.file, I.remendoVale(i, t.texto), `App: tarefa de antes ainda vale em "${i.titulo}"`); kb.foco = { col: card.dataset.col, i: +card.dataset.i }; renderKanban(); }
+        return;
+      }
       const add = e.target.closest('[data-add]');
       if (add) { kb.criando = add.dataset.add; kb.editando = null; renderKanban(); return; }
       const b = e.target.closest('.card-b button'); if (!b) return;

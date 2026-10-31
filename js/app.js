@@ -8,7 +8,7 @@ import { AREAS, AREA, temPedido } from './modelo.js';
 import { slug as fazerSlug, novaDirecao, rebaixar } from './formato.js';
 import { md, hidratar } from './markdown.js';
 import { criarEtapas, nomeEtapa } from './etapas.js';
-import { total as totalTarefas, remendo as remendoPlano } from './plano.js';
+import { remendo as remendoPlano, avisoKanban } from './plano.js';
 import { novoItem, lerVariaveis, escreverVariaveis } from './item.js';
 import { aplicar as aplicarMd } from './formato.js';
 import { relDe, ideiaDe, noPorRel, maeRel, topoRel, ancestraisRel, indicesRel, abertosPadrao, todosComGalhos, fecharRel, visiveisRel, desenharArvore, migrarUI, largNome } from './arvore.js';
@@ -800,19 +800,19 @@ function renderBody(anim) {
   h += anexosHTML(target.anexos);
   h += `<label class="lab" for="notas">${targetIsIdea ? 'Tuas anotações' : 'Tuas anotações nesta direção'}</label>`;
   h += target.anotacoes.trim()
-    ? `<div class="notas-view" id="notasView" role="button" tabindex="0" aria-label="Editar tuas anotações"><div class="md">${md(target.anotacoes, target.base, backend)}</div></div><textarea class="notas" id="notas" hidden placeholder="Escreve aqui. Só tu mexes neste campo.">${esc(target.anotacoes)}</textarea>`
-    : `<textarea class="notas" id="notas" placeholder="Escreve aqui. Só tu mexes neste campo. Markdown simples vale.">${esc(target.anotacoes)}</textarea>`;
+    ? `<div class="notas-view" id="notasView" role="button" tabindex="0" aria-label="Editar tuas anotações"><div class="md">${md(target.anotacoes, target.base, backend)}</div></div><textarea class="notas" id="notas" hidden placeholder="Escreve aqui. Só tu mexe neste campo.">${esc(target.anotacoes)}</textarea>`
+    : `<textarea class="notas" id="notas" placeholder="Escreve aqui. Só tu mexe neste campo. Markdown simples vale.">${esc(target.anotacoes)}</textarea>`;
   h += `</div></section>`;
   // LAPIDADO
   const editando = lapEditando === target.file;
   h += `<section class="layer lap" aria-labelledby="ll"><header class="layer-h"><b id="ll">Lapidado</b><span>do Claude</span><span class="sp"></span>${editando ? '' : `<button class="mini" data-act="editar-lap" aria-label="Editar o lapidado em markdown">editar</button>`}</header><div class="layer-b">`;
   if (editando) {
     h += `<label class="lab" for="lapCru">Markdown do lapidado</label><textarea class="cru" id="lapCru" spellcheck="true">${esc(target.lapidado)}</textarea>
-      <div class="cru-bar"><button class="btn btn--sm btn--solid" data-act="fechar-lap">Pronto</button><small>Salva sozinho enquanto escreves. Títulos aqui começam com ###.</small></div>`;
+      <div class="cru-bar"><button class="btn btn--sm btn--solid" data-act="fechar-lap">Pronto</button><small>Salva sozinho enquanto tu escreve. Títulos aqui começam com ###.</small></div>`;
   } else if (target.lapidado) {
     h += `<div class="md">${md(target.lapidado, target.base, backend)}</div>`;
   } else {
-    h += `<p class="empty">${targetIsIdea ? 'Ainda sem lapidado. O Claude escreve aqui o resumo e o brainstorm.' : 'Ainda sem lapidado. Tu criaste esta direção; o Claude só escreve aqui quando pedires.'}</p>`;
+    h += `<p class="empty">${targetIsIdea ? 'Ainda sem lapidado. O Claude escreve aqui o resumo e o brainstorm.' : 'Ainda sem lapidado. Tu criou esta direção; o Claude só escreve aqui quando tu pedir.'}</p>`;
   }
   if (tkids.length) {
     h += `<span class="lab" style="margin-top:22px">${targetIsIdea ? 'Direções' : 'Direções dentro'} · ${tkids.length}</span><ul class="dlist">`;
@@ -824,7 +824,7 @@ function renderBody(anim) {
     h += `</ul>`;
   }
   if (target.pedido) {
-    h += `<div class="dev" style="margin-top:${tkids.length ? 16 : 4}px"><div class="wait" style="--c:${col}" role="status"><strong>Claude desenvolvendo…</strong><p>Leva de 1 a 3 minutos. As direções novas aparecem nesta estação sozinhas; podes continuar mexendo no resto.</p><div class="rail"><div class="runner"></div></div><button class="btn btn--sm" data-act="cancelar">${ICON.x}Cancelar pedido</button></div></div>`;
+    h += `<div class="dev" style="margin-top:${tkids.length ? 16 : 4}px"><div class="wait" style="--c:${col}" role="status"><strong>Claude desenvolvendo…</strong><p>Leva de 1 a 3 minutos. As direções novas aparecem nesta estação sozinhas; dá para continuar mexendo no resto.</p><div class="rail"><div class="runner"></div></div><button class="btn btn--sm" data-act="cancelar">${ICON.x}Cancelar pedido</button></div></div>`;
   } else if (!tkids.length) {
     h += `<div class="dev"><button class="btn btn--solid" data-act="desenvolver">${ICON.branch}Desenvolver</button><small>${targetIsIdea ? 'Pede ao Claude direções para esta ideia.' : 'Pede ao Claude direções novas dentro desta.'} Nada muda até ele responder.</small></div>`;
   }
@@ -1084,7 +1084,7 @@ function reativar(key) {
 function guardar(idea) {
   store.remendar(idea.file, { fm: { estado: 'guardada' } }, `App: guarda a ideia "${idea.titulo}" na gaveta`);
   renderGaveta();
-  toast('Guardada na gaveta. Sai do mapa até tu reativares.');
+  toast('Guardada na gaveta. Sai do mapa até tu reativar.');
   navigate([], { dir: 'out' });
 }
 $('#btnGaveta').addEventListener('click', openGaveta);
@@ -1131,7 +1131,7 @@ function mudarEstado(idea, estado) {
     const msg = estado === 'kanban' ? (de === 'feita' ? `App: reabre "${t}" no Kanban` : `App: manda "${t}" para o Kanban`)
       : estado === 'edicao' ? `App: volta "${t}" para a Edição` : `App: conclui "${t}"`;
     store.remendar(idea.file, { fm: { estado } }, msg);
-    if (estado === 'kanban' && de === 'edicao') { irPara('kanban', key); toast(`No Kanban: ${plural(totalTarefas(idea.plano), 'tarefa', 'tarefas')} em A fazer.`); return; }
+    if (estado === 'kanban' && de === 'edicao') { irPara('kanban', key); toast(avisoKanban(idea.plano)); return; }
     if (estado === 'edicao') { irPara('edicao', key); toast('Voltou para a Edição.'); return; }
     renderAll();
     toast(estado === 'feita' ? 'Concluída. Fica em “Concluídas”, no Kanban.' : 'Reaberta no Kanban.');
@@ -1153,7 +1153,7 @@ function mudarEstado(idea, estado) {
     toast('Voltou ao Brainstorm.', { acao: 'Ver no mapa', fn: () => { irPara('brainstorm'); setTimeout(() => flash('i:' + key), RM.matches ? 0 : 700); } });
     return;
   }
-  if (estado === 'kanban' && de === 'edicao') { irPara('kanban', key); toast(`No Kanban: ${plural(totalTarefas(idea.plano), 'tarefa', 'tarefas')} em A fazer.`); return; }
+  if (estado === 'kanban' && de === 'edicao') { irPara('kanban', key); toast(avisoKanban(idea.plano)); return; }
   if (estado === 'edicao') { irPara('edicao', key); toast('Voltou para a Edição.'); return; }
   renderAll();
   toast(estado === 'feita' ? 'Concluída. Fica em “Concluídas”, no Kanban.' : 'Reaberta no Kanban.');
@@ -1408,7 +1408,7 @@ $('#btnUsarChave').addEventListener('click', () => {
   $('#token').focus();
 });
 function erroDaVolta(erro) {
-  if (erro === 'access_denied') return 'Entrada cancelada no GitHub. Clica de novo quando quiseres entrar.';
+  if (erro === 'access_denied') return 'Entrada cancelada no GitHub. Clica de novo quando tu quiser entrar.';
   return `O GitHub não deixou entrar (${erro}). Tenta de novo.`;
 }
 $('#formEntrada').addEventListener('submit', async e => {

@@ -349,7 +349,7 @@ test('campo livre (para onde eu quero): nasce no começo de Perguntas, grava o t
   assert.equal(it.rumo, 'Ser um vídeo só.');
   assert.deepEqual(it.perguntas.map(p => p.q), ['Para quem é']);
   assert.deepEqual(it.descartadas, ['Quanto tempo tenho?']);
-  assert.match(lerSecao(abrir(t), ['Perguntas']), /^### Para onde eu quero\nSer um vídeo só\.\n\n### Para quem é\n\n### Descartadas\n- Quanto tempo tenho\?\n    > Duas semanas\.$/);
+  assert.match(lerSecao(abrir(t), ['Perguntas']), /^### Para onde eu quero\nSer um vídeo só\.\n\n### Para quem é\n\n### Descartadas\n- Quanto tempo tenho\?\n    <!-- lugar: depois=inicio nivel=1 -->\n    > Duas semanas\.$/);
   assert.equal(fechar(abrir(t)), t);
 });
 
@@ -378,9 +378,10 @@ test('excluir pergunta: vira descartada; Desfazer devolve o arquivo exato; exclu
   const fila = juntar(juntar(I.remendoResposta('Precisa de convidado / parceiro?', 'v1'), I.remendoExcluir(it, p.q)), I.remendoResposta('Precisa de convidado / parceiro?', 'v2'));
   const f = I.lerItem('x/item.md', aplicar(COMPLETO, fila));
   assert.deepEqual(f.perguntas.map(x => [x.q, x.r]), [['Precisa de convidado / parceiro?', 'v2']]);
-  // trazer de volta depois (com a resposta, desde 30/10), e a lista de descartadas some quando esvazia
+  // trazer de volta depois (com a resposta, desde 30/10; no lugar de onde saiu, desde o reteste), e a lista de
+  // descartadas some quando esvazia
   const tr = aplicar(ex, I.remendoTrazer(ex, 0));
-  assert.deepEqual(I.lerItem('x/item.md', tr).perguntas.map(x => [x.q, x.r]), [['Precisa de convidado / parceiro?', ''], [p.q, p.r]]);
+  assert.deepEqual(I.lerItem('x/item.md', tr).perguntas.map(x => [x.q, x.r]), [[p.q, p.r], ['Precisa de convidado / parceiro?', '']]);
   assert.ok(!tr.includes('### Descartadas'));
 });
 
