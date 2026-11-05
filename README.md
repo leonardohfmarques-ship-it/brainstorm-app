@@ -3,7 +3,7 @@
 O mapa mental das ideias do Leonardo (direção visual "Diagrama"), em três etapas: **Brainstorm** (mapa),
 **Edição** (decidir a ideia) e **Kanban** (plano de ação em cartões). Site estático, sem build: abre no navegador,
 lê e grava as ideias no repositório privado `leonardohfmarques-ship-it/brainstorm` pela API do GitHub.
-O formato dos arquivos é o de `docs/FORMATO.md` daquele repositório; o vocabulário, o de `GLOSSARY.md`.
+O formato dos arquivos é o de `_claude/docs/FORMATO.md` daquele repositório; o vocabulário, o de `_claude/GLOSSARY.md`.
 
 ## Usar
 
