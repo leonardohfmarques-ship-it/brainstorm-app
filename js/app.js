@@ -3,7 +3,7 @@ import CONFIG from '../config.js';
 import { GitHubBackend } from './github.js';
 import { Sessao, escolherInicio, consumirFragmento, enderecoWorker, linkEntrar, esquecer } from './sessao.js';
 import { LocalBackend } from './local.js';
-import { Store } from './sync.js';
+import { Store, APAGAR_PENDENTE } from './sync.js';
 import { AREAS, AREA, temPedido } from './modelo.js';
 import { slug as fazerSlug, novaDirecao, rebaixar } from './formato.js';
 import { md, hidratar } from './markdown.js';
@@ -11,7 +11,7 @@ import { criarEtapas, nomeEtapa } from './etapas.js';
 import { remendo as remendoPlano, avisoKanban } from './plano.js';
 import { novoItem, lerVariaveis, escreverVariaveis } from './item.js';
 import { aplicar as aplicarMd } from './formato.js';
-import { relDe, ideiaDe, noPorRel, maeRel, topoRel, ancestraisRel, indicesRel, abertosPadrao, todosComGalhos, fecharRel, visiveisRel, desenharArvore, migrarUI, largNome } from './arvore.js';
+import { relDe, ideiaDe, noPorRel, maeRel, topoRel, ancestraisRel, indicesRel, abertosPadrao, todosComGalhos, fecharRel, visiveisRel, desenharArvore, migrarUI, largNome, fimDoNome } from './arvore.js';
 
 const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 const RM = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -860,6 +860,9 @@ function bindBody(pin, target, targetIsIdea, d) {
   if (cru) cru.addEventListener('input', () => store.remendar(file, { sec: { 'Lapidado': rebaixar(cru.value, 3) } }, `App: edita o lapidado de "${titulo}"`));
   pin.querySelectorAll('[data-kid]').forEach(b => b.addEventListener('click', () => select(b.dataset.kid, { fromTab: true })));
   pin.querySelectorAll('[data-ir]').forEach(b => b.addEventListener('click', () => select(b.dataset.ir, { fromTab: true })));
+  // com o campo do nome aberto, o botão não pode roubar o foco: o blur criava a direção e redesenhava o painel
+  // antes do clique chegar (o clique se perdia e nascia uma "Direção nova")
+  pin.querySelectorAll('[data-act="apagar"]').forEach(b => b.addEventListener('mousedown', e => { if (renaming) e.preventDefault(); }));
   pin.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => {
     const a = b.dataset.act;
     if (a === 'renomear') startRename(d ? UI.sel : null);
@@ -900,7 +903,15 @@ function startRename(slugDir) {
   const input = document.createElement('input');
   input.className = 'ren'; input.value = old; input.setAttribute('aria-label', ehIdeia ? 'Novo nome da ideia' : 'Novo nome da direção'); input.maxLength = 80;
   ttl.replaceWith(input);
-  renaming = { input };
+  // fechar: volta o nome em texto; sem gravar nada
+  const fechar = name => {
+    renaming = null;
+    live(name);
+    const span = document.createElement('span'); span.className = 'ttl'; span.dataset.ttl = ''; span.textContent = name;
+    input.replaceWith(span);
+    n.title = name; n.el.setAttribute('aria-label', isCenter ? name : `Direção: ${name}`);
+  };
+  renaming = { input, file, provisorio, cancelar: () => { if (renaming && renaming.input === input) fechar(old); } };
   input.focus(); input.select();
   const live = v => {
     const name = v.trim() || old;
@@ -913,26 +924,24 @@ function startRename(slugDir) {
   input.addEventListener('pointerdown', e => e.stopPropagation());
   input.addEventListener('click', e => e.stopPropagation());
   input.addEventListener('dblclick', e => e.stopPropagation());
-  const finish = keep => {
-    if (!renaming) return; renaming = null;
-    const name = keep ? (input.value.replace(/\s+/g, ' ').trim() || old) : old;
-    live(name);
-    const span = document.createElement('span'); span.className = 'ttl'; span.dataset.ttl = ''; span.textContent = name;
-    input.replaceWith(span);
-    n.title = name; n.el.setAttribute('aria-label', isCenter ? name : `Direção: ${name}`);
-    if (provisorio) { criarDirecao(alvo, name); return; }
-    if (name !== old) {
-      store.remendar(file, { fm: { titulo: name } }, `App: renomeia ${ehIdeia ? 'ideia' : 'direção'} "${old}" para "${name}"`);
+  const finish = motivo => {
+    if (!renaming || renaming.input !== input) return;
+    const fim = fimDoNome({ provisorio, motivo, valor: input.value, antigo: old });
+    fechar(fim.nome);
+    if (fim.acao === 'descartar') { descartarProvisorio(alvo); return; }  // Esc numa direção nova: ela some
+    if (fim.acao === 'criar') { criarDirecao(alvo, fim.nome); return; }
+    if (fim.acao === 'renomear') {
+      store.remendar(file, { fm: { titulo: fim.nome } }, `App: renomeia ${ehIdeia ? 'ideia' : 'direção'} "${old}" para "${fim.nome}"`);
       renderCrumbs();
     }
     n.el.focus({ preventScroll: true });
   };
   input.addEventListener('keydown', e => {
-    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
-    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
+    if (e.key === 'Enter') { e.preventDefault(); finish('enter'); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish('esc'); }
     e.stopPropagation();
   });
-  input.addEventListener('blur', () => finish(true));
+  input.addEventListener('blur', () => finish('blur'));
 }
 
 /* ---------------- criar direção ----------------
@@ -977,6 +986,14 @@ function criarDirecao(alvo, name) {
   if (UI.sel === relAntigo) { UI.sel = relNovo; saveUI(); }
   renderPanel(false); renderMap({ keep: true });
   const n = G.byId['d:' + relNovo]; if (n) n.el.focus({ preventScroll: true });
+}
+// direção nova que ele desistiu (Esc ou Apagar com o nome aberto): some sem ir ao GitHub; a seleção sobe para a mãe
+function descartarProvisorio(dir) {
+  const rel = relDe(dir);
+  provisorios.delete(dir.file);
+  store.descartar(dir.file);
+  if (UI.sel && (UI.sel === rel || UI.sel.startsWith(rel + '/'))) UI.sel = maeRel(rel);
+  saveUI(); renderAll({ keep: true });
 }
 // depois de cada reconstrução, as direções ainda sem arquivo continuam marcadas
 function remarcarProvisorios() {
@@ -1166,12 +1183,15 @@ function efetivarAdiado() { if (!adiado) return; const a = adiado; adiado = null
 function contarDentro(n) { let d = 0, x = n.anexos.length; const walk = k => k.direcoes.forEach(c => { d++; x += c.anexos.length; walk(c); }); walk(n); return { d, x }; }
 function apagarDirecao(dir) {
   if (!dir || dir.kind !== 'direcao' || busy) return;
-  if (renaming) renaming.input.blur();
+  // direção nova (sem arquivo): o objeto pode ter sido refeito, então vale a lista de provisórias
+  const prov = provisorios.has(dir.file);
+  if (renaming && prov && renaming.file === dir.file) renaming.cancelar(); // fecha o nome sem criar o arquivo
+  else if (renaming) renaming.input.blur();
+  if (prov) { descartarProvisorio(dir); return; }
   const rel = relDe(dir), dona = ideiaDe(dir);
   // se a selecionada está nela (ou é ela), a seleção sobe para a mãe
   const naTela = UI.etapa === 'brainstorm' && dona && UI.path[0] === dona.key;
   const subir = () => { if (naTela && UI.sel && (UI.sel === rel || UI.sel.startsWith(rel + '/'))) UI.sel = maeRel(rel); };
-  if (dir.provisorio) { provisorios.delete(dir.file); store.files.delete(dir.file); store.reconstruir(); subir(); saveUI(); renderAll({ keep: true }); return; }
   efetivarAdiado();
   const base = dir.base, titulo = dir.titulo;
   const { d, x } = contarDentro(dir);
@@ -1310,7 +1330,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 const haPedido = () => !!store && !store.pend.size && (M().ideias.some(temPedido) || M().itens.some(i => i.pedidos.length > 0));
 setInterval(() => { if (document.visibilityState === 'visible' && Date.now() - ultimaBusca > (haPedido() ? 20000 : 120000)) buscarRemoto(false); }, 10000);
 window.addEventListener('online', () => { if (store && store.pend.size) store.agora(); });
-window.addEventListener('beforeunload', e => { efetivarAdiado(); if (store && store.ocupado) { e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('beforeunload', e => { efetivarAdiado(); if (store && store.pend.size) store.agora(); if (store && store.ocupado) { e.preventDefault(); e.returnValue = ''; } });
 
 /* ---------------- teclado ---------------- */
 document.addEventListener('keydown', e => {
@@ -1430,7 +1450,7 @@ $('#formEntrada').addEventListener('submit', async e => {
 
 async function iniciar(b) {
   backend = b;
-  store = new Store(backend);
+  store = new Store(backend, { memoria: ST, chave: APAGAR_PENDENTE + (LOCAL ? '-local' : '') });
   store.on((tipo, path) => {
     if (tipo === 'status') renderStatus();
     // entrada com GitHub: renovação recusada ao salvar → volta para a tela de entrada
@@ -1456,12 +1476,15 @@ async function iniciar(b) {
     return;
   }
   estado(null);
+  // apagar que ficou pela metade (página fechada ou recarregada antes do envio): termina agora
+  const retomados = store.retomarApagar();
   // estado salvo do tempo de "uma página por direção": vira ideia aberta com a direção selecionada
   const abertosSalvos = ls.get('bs-abertos', {});
   if (migrarUI(UI, abertosSalvos, k => ideiaPorKey(k))) { ls.set('bs-abertos', abertosSalvos); saveUI(); }
   if (store.truncado) toast('O repositório ficou grande demais para ler de uma vez; algumas ideias podem faltar.');
   if (store.model.erros.length) toast(`${plural(store.model.erros.length, 'arquivo ignorado', 'arquivos ignorados')}: fora do formato.`);
   renderAll({ enter: true, panelIn: UI.path.length > 0 });
+  if (retomados.length) toast(retomados.length === 1 ? 'Terminando de apagar a direção que ficou pela metade.' : `Terminando de apagar ${retomados.length} direções que ficaram pela metade.`);
 }
 
 /* ---------------- início ---------------- */

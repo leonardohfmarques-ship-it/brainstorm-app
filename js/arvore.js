@@ -170,3 +170,14 @@ export function migrarUI(ui, abertos, achar) {
   }
   return true;
 }
+
+/* ---------------- fim do campo de nome ----------------
+   O que fazer quando o campo do nome fecha. motivo: 'enter', 'blur' (clicou fora), 'esc' ou 'apagar' (clicou em
+   "Apagar direção" com o campo aberto). Direção provisória (ainda sem arquivo) só vira arquivo com Enter ou clique
+   fora; Esc e Apagar descartam, senão nascia uma "Direção nova" que ele não queria. */
+export function fimDoNome({ provisorio = false, motivo, valor = '', antigo = '' }) {
+  const nome = String(valor).replace(/\s+/g, ' ').trim() || antigo;
+  if (provisorio) return (motivo === 'esc' || motivo === 'apagar') ? { acao: 'descartar', nome: antigo } : { acao: 'criar', nome };
+  if (motivo === 'esc') return { acao: 'nada', nome: antigo };
+  return nome !== antigo ? { acao: 'renomear', nome } : { acao: 'nada', nome };
+}

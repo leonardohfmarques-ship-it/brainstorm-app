@@ -38,9 +38,14 @@ export function mesmosTextos(antes, agora) {
 const chaves = m => m instanceof Map ? [...m.keys()] : Array.isArray(m) ? m.map(x => typeof x === 'string' ? x : JSON.stringify(x)) : Object.keys(m || {});
 const mesmasChaves = (a, b) => { const x = chaves(a).sort().join('\n'), y = chaves(b).sort().join('\n'); return x === y; };
 
+// apagar que ainda não chegou ao backend fica anotado no navegador: se a página fechar antes do envio, o próximo
+// carregamento termina o serviço (antes a direção "sumia e voltava" ao recarregar logo depois de apagar)
+export const APAGAR_PENDENTE = 'bs-apagar-pendente';
+
 export class Store {
-  constructor(backend) {
+  constructor(backend, { memoria = null, chave = APAGAR_PENDENTE } = {}) {
     this.b = backend;
+    this.memoria = memoria; this.chave = chave;
     this.files = new Map();   // path -> { text (local), remoto, sha }
     this.pend = new Map();    // path -> { patch, criar, inicial, msgs }
     this.anexos = []; this.mapa = {}; this.rev = null;
@@ -113,7 +118,36 @@ export class Store {
     for (const p of [...this.pend.keys()]) if (dentro(p)) this.pend.delete(p);
     this.anexos = this.anexos.filter(a => !dentro(a.path));
     this.pend.set('apagar:' + base, { apagar: base, patch: null, msgs: [msg] });
+    this.anotarApagar(base, msg);
     this.reconstruir(); this.agendar();
+  }
+  // direção que nunca foi para o backend (nome ainda aberto): some da memória e nada vai para a fila
+  descartar(path) {
+    this.files.delete(path); this.pend.delete(path);
+    this.reconstruir();
+  }
+
+  // lista de apagar pendentes guardada no navegador (falha de armazenamento não pode travar o app)
+  apagarPendentes() {
+    if (!this.memoria) return [];
+    try { const l = JSON.parse(this.memoria.getItem(this.chave) || '[]'); return Array.isArray(l) ? l.filter(x => x && x.base) : []; } catch (e) { return []; }
+  }
+  guardarPendentes(l) {
+    if (!this.memoria) return;
+    try { if (l.length) this.memoria.setItem(this.chave, JSON.stringify(l)); else this.memoria.removeItem(this.chave); } catch (e) { /* nada */ }
+  }
+  anotarApagar(base, msg) { this.guardarPendentes(this.apagarPendentes().filter(x => x.base !== base).concat({ base, msg })); }
+  esquecerApagar(base) { this.guardarPendentes(this.apagarPendentes().filter(x => x.base !== base)); }
+  // depois de carregar: o que ficou anotado e ainda existe volta para a fila; o que já sumiu sai da lista
+  retomarApagar() {
+    const feitos = [];
+    for (const { base, msg } of this.apagarPendentes()) {
+      const existe = [...this.files.keys()].some(p => p.startsWith(base + '/')) || this.anexos.some(a => a.path.startsWith(base + '/'));
+      if (!existe) { this.esquecerApagar(base); continue; }
+      this.apagarPasta(base, msg || `App: apaga ${base}`);
+      feitos.push(base);
+    }
+    return feitos;
   }
 
   agendar(ms = ESPERA) {
@@ -152,7 +186,7 @@ export class Store {
   }
 
   async enviar(path, job) {
-    if (job.apagar) { await this.b.apagar(job.apagar, mensagem(job.msgs)); return; }
+    if (job.apagar) { await this.b.apagar(job.apagar, mensagem(job.msgs)); this.esquecerApagar(job.apagar); return; }
     const f = this.files.get(path); if (!f) return;
     const msg = mensagem(job.msgs.length ? job.msgs : ['App: atualiza ' + path]);
     for (let t = 0; t < 3; t++) {

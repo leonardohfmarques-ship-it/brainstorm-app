@@ -5,6 +5,8 @@ import { createHash } from 'node:crypto';
 import { GitHubBackend, paraB64 } from '../js/github.js';
 import { LocalBackend } from '../js/local.js';
 import { Store } from '../js/sync.js';
+import { fimDoNome } from '../js/arvore.js';
+import { novaDirecao } from '../js/formato.js';
 
 const TOKEN = 'github_pat_FALSO_456';
 const sha = t => createHash('sha1').update(t).digest('hex');
@@ -155,4 +157,67 @@ test('local: apagar some ao recarregar, não toca nos arquivos e "descartar" tra
   const b3 = new LocalBackend({ atraso: 0 }); b3.listar = listar;
   const s3 = new Store(b3); await s3.carregar();
   assert.equal(s3.model.ideias.find(i => i.key === 'youtube/quadro').direcoes.length, 3);
+});
+
+/* ---------------- direção nova com o nome aberto (09/11: "o botão de apagar direção não funciona") ---------------- */
+test('nome aberto: Apagar e Esc numa direção provisória descartam; Enter e clique fora criam', () => {
+  const prov = { provisorio: true, antigo: 'Direção nova' };
+  assert.equal(fimDoNome({ ...prov, motivo: 'apagar', valor: 'Direção nova' }).acao, 'descartar', 'clicar em Apagar não cria a direção');
+  assert.equal(fimDoNome({ ...prov, motivo: 'apagar', valor: 'Algo digitado' }).acao, 'descartar', 'nem com nome digitado');
+  assert.equal(fimDoNome({ ...prov, motivo: 'esc', valor: 'Direção nova' }).acao, 'descartar', 'Esc não vira "Direção nova"');
+  assert.deepEqual(fimDoNome({ ...prov, motivo: 'enter', valor: '  Com   espaços ' }), { acao: 'criar', nome: 'Com espaços' });
+  assert.deepEqual(fimDoNome({ ...prov, motivo: 'blur', valor: '   ' }), { acao: 'criar', nome: 'Direção nova' });
+  // direção antiga: Esc não muda nada; Enter só grava se o nome mudou; Apagar com o nome aberto não cria nada novo
+  const velha = { provisorio: false, antigo: 'Antiga' };
+  assert.equal(fimDoNome({ ...velha, motivo: 'esc', valor: 'Outra' }).acao, 'nada');
+  assert.equal(fimDoNome({ ...velha, motivo: 'enter', valor: 'Antiga' }).acao, 'nada');
+  assert.deepEqual(fimDoNome({ ...velha, motivo: 'blur', valor: 'Outra' }), { acao: 'renomear', nome: 'Outra' });
+  assert.notEqual(fimDoNome({ ...velha, motivo: 'apagar', valor: 'Antiga' }).acao, 'criar');
+});
+
+test('Store: descartar a direção provisória não manda nada ao GitHub', async () => {
+  const r = repoFalso(inicial); const s = new Store(novo(r)); await s.carregar();
+  const path = `${Q}/direcoes/direcao-nova/direcao.md`;
+  s.files.set(path, { text: novaDirecao('Direção nova', 4), remoto: null, sha: null }); s.reconstruir();
+  const qtd = () => s.model.ideias.find(i => i.key === 'youtube/quadro').direcoes.length;
+  assert.equal(qtd(), 4);
+  s.descartar(path);
+  assert.equal(qtd(), 3);
+  assert.equal(s.ocupado, false, 'nada na fila');
+  await s.agora(); clearTimeout(s.timer);
+  assert.equal(r.log.filter(l => l.metodo !== 'GET').length, 0, 'nenhum commit');
+  assert.ok(!r.files.has(path));
+});
+
+function memoriaFalsa() { const m = new Map(); return { m, getItem: k => m.has(k) ? m.get(k) : null, setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k) }; }
+
+test('apagar e recarregar antes do envio: o próximo carregamento termina o serviço (não "some e volta")', async () => {
+  const r = repoFalso(inicial); const mem = memoriaFalsa();
+  const base = `${Q}/direcoes/ruim`;
+  const s1 = new Store(novo(r), { memoria: mem }); await s1.carregar();
+  s1.ocultar(base); s1.apagarPasta(base, 'App: apaga a direção "Ruim"');
+  clearTimeout(s1.timer); // a página fechou antes dos 800 ms: nada foi enviado
+  assert.ok(r.files.has(`${base}/direcao.md`));
+  assert.equal(JSON.parse(mem.getItem('bs-apagar-pendente'))[0].base, base, 'ficou anotado no navegador');
+  const s2 = new Store(novo(r), { memoria: mem }); await s2.carregar();
+  assert.deepEqual(s2.retomarApagar(), [base]);
+  assert.equal(s2.model.ideias.find(i => i.key === 'youtube/quadro').direcoes.length, 2, 'já some da tela ao abrir');
+  await s2.agora(); clearTimeout(s2.timer);
+  assert.ok(![...r.files.keys()].some(p => p.startsWith(base + '/')), 'apagado no GitHub');
+  assert.equal(mem.getItem('bs-apagar-pendente'), null, 'anotação limpa depois do envio');
+  // de novo: nada a retomar, nenhum commit a mais
+  const commits = r.log.filter(l => l.metodo === 'PATCH').length;
+  const s3 = new Store(novo(r), { memoria: mem }); await s3.carregar();
+  assert.deepEqual(s3.retomarApagar(), []);
+  await s3.agora(); clearTimeout(s3.timer);
+  assert.equal(r.log.filter(l => l.metodo === 'PATCH').length, commits);
+});
+
+test('apagar anotado de uma pasta que já não existe sai da lista sem commit', async () => {
+  const r = repoFalso(inicial); const mem = memoriaFalsa();
+  mem.setItem('bs-apagar-pendente', JSON.stringify([{ base: `${Q}/direcoes/nao-tem`, msg: 'App: apaga' }]));
+  const s = new Store(novo(r), { memoria: mem }); await s.carregar();
+  assert.deepEqual(s.retomarApagar(), []);
+  assert.equal(mem.getItem('bs-apagar-pendente'), null);
+  assert.equal(s.ocupado, false);
 });
