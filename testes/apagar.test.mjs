@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { GitHubBackend, paraB64 } from '../js/github.js';
 import { LocalBackend } from '../js/local.js';
 import { Store } from '../js/sync.js';
-import { fimDoNome } from '../js/arvore.js';
+import { fimDoNome, descreverClique, seletorDoClique } from '../js/arvore.js';
 import { novaDirecao } from '../js/formato.js';
 
 const TOKEN = 'github_pat_FALSO_456';
@@ -220,4 +220,37 @@ test('apagar anotado de uma pasta que já não existe sai da lista sem commit', 
   assert.deepEqual(s.retomarApagar(), []);
   assert.equal(mem.getItem('bs-apagar-pendente'), null);
   assert.equal(s.ocupado, false);
+});
+
+/* ---------------- outros cliques com o nome de uma direção nova aberto (09/11) ----------------
+   O nome fecha como "clique fora" (cria a direção) e o clique vai para o mesmo botão na tela redesenhada. */
+const elFalso = (tag, classes, attrs) => ({ tagName: tag.toUpperCase(), classList: classes, hasAttribute: a => a in attrs, getAttribute: a => attrs[a] ?? null });
+const DE = 'direcao-nova-2', PARA = 'meu-nome';
+const sel = el => seletorDoClique(descreverClique(el), DE, PARA);
+
+test('clique com nome aberto: Desenvolver, Decidir, Renomear e Guardar acham o mesmo botão no painel novo', () => {
+  assert.equal(sel(elFalso('button', ['btn', 'btn--solid'], { 'data-act': 'desenvolver' })), 'button.btn[data-act="desenvolver"]');
+  assert.equal(sel(elFalso('button', ['btn', 'btn--sm', 'btn--solid'], { 'data-act': 'decidir' })), 'button.btn[data-act="decidir"]');
+  assert.equal(sel(elFalso('button', ['btn', 'btn--sm'], { 'data-act': 'renomear' })), 'button.btn[data-act="renomear"]');
+  assert.equal(sel(elFalso('button', ['btn', 'btn--sm'], { 'data-act': 'guardar' })), 'button.btn[data-act="guardar"]');
+});
+
+test('clique com nome aberto: aba de outra direção fica igual; a aba e a estação da própria nova passam para o nome criado', () => {
+  assert.equal(sel(elFalso('button', ['tab'], { id: 'tab-serie', 'data-id': 'serie' })), 'button.tab[data-id="serie"]');
+  assert.equal(sel(elFalso('button', ['tab'], { id: 'tab-c', 'data-id': '' })), 'button.tab[data-id=""]', 'aba Resumo');
+  assert.equal(sel(elFalso('button', ['tab'], { id: 'tab-' + DE, 'data-id': DE })), `button.tab[data-id="${PARA}"]`);
+  assert.equal(sel(elFalso('button', ['st', 'st--dir', 'is-sel'], { 'data-id': 'd:' + DE })), `button.st[data-id="d:${PARA}"]`);
+  assert.equal(sel(elFalso('button', ['st', 'st--dir'], { 'data-id': 'd:base' })), 'button.st[data-id="d:base"]', 'outra estação');
+  assert.equal(sel(elFalso('button', ['drow'], { 'data-kid': DE })), `button.drow[data-kid="${PARA}"]`);
+});
+
+test('clique com nome aberto: botões por id, campos e o que não tem como achar', () => {
+  assert.equal(sel(elFalso('button', ['btn'], { id: 'btnNova' })), '[id="btnNova"]');
+  assert.equal(sel(elFalso('textarea', ['notas'], { id: 'notas' })), '[id="notas"]');
+  assert.equal(sel(elFalso('button', ['crumb'], { 'data-k': '0' })), 'button.crumb[data-k="0"]');
+  assert.equal(sel(elFalso('div', [], {})), null, 'fundo do mapa: só fecha o nome');
+  assert.equal(seletorDoClique(null, DE, PARA), null);
+  assert.equal(seletorDoClique(descreverClique(elFalso('button', ['x'], { 'data-id': 'a"b' })), DE, PARA), 'button.x[data-id="a\\"b"]', 'aspas escapadas');
+  // sem nome novo (falhou ao criar), nada é trocado
+  assert.equal(seletorDoClique(descreverClique(elFalso('button', ['tab'], { 'data-id': DE })), DE, DE), `button.tab[data-id="${DE}"]`);
 });

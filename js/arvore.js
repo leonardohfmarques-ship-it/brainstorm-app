@@ -181,3 +181,28 @@ export function fimDoNome({ provisorio = false, motivo, valor = '', antigo = '' 
   if (motivo === 'esc') return { acao: 'nada', nome: antigo };
   return nome !== antigo ? { acao: 'renomear', nome } : { acao: 'nada', nome };
 }
+
+/* ---------------- clique com o nome de uma direção nova aberto ----------------
+   O nome fecha como "clique fora" (cria a direção) e o app redesenha painel e mapa; o clique então vai para o
+   elemento equivalente na tela nova. descreverClique guarda o que identifica o elemento clicado; seletorDoClique
+   monta o seletor dele, trocando o endereço provisório (de) pelo da direção criada (para). */
+export const ATRIBUTOS_CLIQUE = ['data-act', 'data-kid', 'data-ir', 'data-k', 'data-ed', 'data-id', 'id'];
+export function descreverClique(el) {
+  if (!el) return null;
+  const attrs = {};
+  for (const a of ATRIBUTOS_CLIQUE) if (el.hasAttribute(a)) attrs[a] = el.getAttribute(a);
+  return { tag: String(el.tagName || '').toLowerCase(), classe: (el.classList && el.classList[0]) || '', attrs };
+}
+export function seletorDoClique(desc, de, para) {
+  if (!desc) return null;
+  const a = ATRIBUTOS_CLIQUE.find(k => desc.attrs[k] != null);
+  if (!a) return null;
+  let v = desc.attrs[a];
+  if (de && para && de !== para) {
+    if (v === de) v = para;
+    else if (v === 'd:' + de) v = 'd:' + para;
+    else if (v === 'tab-' + de) v = 'tab-' + para;
+  }
+  const q = `[${a}="${String(v).replace(/["\\]/g, '\\$&')}"]`;
+  return a === 'id' ? q : `${desc.tag}${desc.classe ? '.' + desc.classe.replace(/[^\w-]/g, '') : ''}${q}`;
+}

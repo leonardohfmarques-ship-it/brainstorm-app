@@ -11,7 +11,7 @@ import { criarEtapas, nomeEtapa } from './etapas.js';
 import { remendo as remendoPlano, avisoKanban } from './plano.js';
 import { novoItem, lerVariaveis, escreverVariaveis } from './item.js';
 import { aplicar as aplicarMd } from './formato.js';
-import { relDe, ideiaDe, noPorRel, maeRel, topoRel, ancestraisRel, indicesRel, abertosPadrao, todosComGalhos, fecharRel, visiveisRel, desenharArvore, migrarUI, largNome, fimDoNome } from './arvore.js';
+import { relDe, ideiaDe, noPorRel, maeRel, topoRel, ancestraisRel, indicesRel, abertosPadrao, todosComGalhos, fecharRel, visiveisRel, desenharArvore, migrarUI, largNome, fimDoNome, ATRIBUTOS_CLIQUE, descreverClique, seletorDoClique } from './arvore.js';
 
 const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 const RM = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -860,9 +860,6 @@ function bindBody(pin, target, targetIsIdea, d) {
   if (cru) cru.addEventListener('input', () => store.remendar(file, { sec: { 'Lapidado': rebaixar(cru.value, 3) } }, `App: edita o lapidado de "${titulo}"`));
   pin.querySelectorAll('[data-kid]').forEach(b => b.addEventListener('click', () => select(b.dataset.kid, { fromTab: true })));
   pin.querySelectorAll('[data-ir]').forEach(b => b.addEventListener('click', () => select(b.dataset.ir, { fromTab: true })));
-  // com o campo do nome aberto, o botão não pode roubar o foco: o blur criava a direção e redesenhava o painel
-  // antes do clique chegar (o clique se perdia e nascia uma "Direção nova")
-  pin.querySelectorAll('[data-act="apagar"]').forEach(b => b.addEventListener('mousedown', e => { if (renaming) e.preventDefault(); }));
   pin.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => {
     const a = b.dataset.act;
     if (a === 'renomear') startRename(d ? UI.sel : null);
@@ -911,8 +908,8 @@ function startRename(slugDir) {
     input.replaceWith(span);
     n.title = name; n.el.setAttribute('aria-label', isCenter ? name : `Direção: ${name}`);
   };
-  renaming = { input, file, provisorio, cancelar: () => { if (renaming && renaming.input === input) fechar(old); } };
-  input.focus(); input.select();
+  renaming = { input, file, provisorio, rel: slugDir, fora: () => finish('blur'), cancelar: () => { if (renaming && renaming.input === input) fechar(old); } };
+  input.focus({ preventScroll: true }); input.select(); // sem rolar a página (ela pulava ~115 px para o lado)
   const live = v => {
     const name = v.trim() || old;
     const tab = document.querySelector(`.tab[data-id="${CSS.escape(isCenter ? '' : slugDir)}"] .t`); if (tab && !(isCenter && ehIdeia)) tab.textContent = name;
@@ -972,6 +969,30 @@ function newDirection() {
   setTimeout(() => startRename(rel), RM.matches ? 0 : 260);
 }
 const provisorios = new Set();
+let ultimaCriada = null; // { de: rel provisório, para: rel da direção criada }
+/* Regra geral (09/11): com o nome de uma direção nova aberto, nenhum clique tira o foco do campo antes de terminar.
+   O mousedown não move o foco; no click (fase de captura), o nome fecha como "clique fora" (cria a direção, o que
+   redesenha painel e mapa) e o clique vai para o elemento equivalente da tela nova, já com a direção de verdade.
+   Antes o blur no mousedown redesenhava tudo e o clique se perdia. Exceção: "Apagar direção" descarta a nova. */
+const ehCampoNome = t => t && t.closest && t.closest('input.ren');
+document.addEventListener('mousedown', e => {
+  if (renaming && renaming.provisorio && !ehCampoNome(e.target)) e.preventDefault();
+}, true);
+document.addEventListener('click', e => {
+  if (!renaming || !renaming.provisorio || ehCampoNome(e.target)) return;
+  if (e.target.closest && e.target.closest('[data-act="apagar"]')) return; // o próprio botão descarta a nova
+  const el = e.target.closest ? e.target.closest(ATRIBUTOS_CLIQUE.map(a => `[${a}]`).join(',')) : null;
+  const desc = descreverClique(el), de = renaming.rel;
+  e.preventDefault(); e.stopPropagation();
+  ultimaCriada = null;
+  renaming.fora(); // fecha como clique fora: cria com o que foi digitado (ou "Direção nova")
+  const para = ultimaCriada && ultimaCriada.de === de ? ultimaCriada.para : de;
+  const sel = seletorDoClique(desc, de, para);
+  const alvo = sel ? document.querySelector(sel) : null;
+  if (!alvo) return;
+  alvo.click();
+  if (alvo.matches('input, textarea, select')) alvo.focus();
+}, true);
 function criarDirecao(alvo, name) {
   const provPath = alvo.file;
   const mae = alvo.mae, relAntigo = relDe(alvo), maeR = relDe(mae);
@@ -983,6 +1004,7 @@ function criarDirecao(alvo, name) {
   const path = `${mae.base}/direcoes/${s}/direcao.md`;
   store.criar(path, novaDirecao(name, alvo.ordem || mae.direcoes.length), `App: cria a direção "${name}" em "${mae.titulo}"`);
   const relNovo = maeR ? maeR + '/' + s : s;
+  ultimaCriada = { de: relAntigo, para: relNovo };
   if (UI.sel === relAntigo) { UI.sel = relNovo; saveUI(); }
   renderPanel(false); renderMap({ keep: true });
   const n = G.byId['d:' + relNovo]; if (n) n.el.focus({ preventScroll: true });
