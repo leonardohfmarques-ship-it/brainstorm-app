@@ -16,6 +16,24 @@ const RE_IDEIA = /^ideias\/([^/]+)\/([^/]+)\/ideia\.md$/;
 const RE_DIR = /^(.+)\/direcoes\/([^/]+)\/direcao\.md$/;
 const RE_ANEXO = /^(.+?)\/anexos\/(.+)$/;
 const RE_ITEM = /^(ideias\/[^/]+\/[^/]+)\/decididas\/([^/]+)\/item\.md$/;
+// lixeira (decisão dele de 09/11/2026): a pasta da ideia inteira vai para lixeira/ideias/<area>/<ideia>/, fora de
+// ideias/, então o mapa, as etapas e as automações nem a enxergam. O app lê só o ideia.md de cada uma (para a lista).
+export const LIXEIRA = 'lixeira/';
+export const RE_LIXO = /^lixeira\/ideias\/([^/]+)\/([^/]+)\/ideia\.md$/;
+export const naLixeira = base => LIXEIRA + base;          // ideias/a/b → lixeira/ideias/a/b
+export const foraDaLixeira = base => base.slice(LIXEIRA.length);
+// lista da lixeira, a mais recente primeiro
+export function lerLixeira(files) {
+  const out = [];
+  for (const [p, f] of files) {
+    const m = p.match(RE_LIXO); if (!m) continue;
+    let campos = {};
+    try { campos = lerCampos(abrir(f.text)); } catch (e) { campos = {}; }
+    const base = p.slice(0, -'/ideia.md'.length);
+    out.push({ base, orig: foraDaLixeira(base), area: m[1], slug: m[2], titulo: String(campos.titulo || '').trim() || m[2].replace(/-/g, ' '), apagada: String(campos.apagada || '') });
+  }
+  return out.sort((a, b) => b.apagada.localeCompare(a.apagada) || a.titulo.localeCompare(b.titulo));
+}
 // arquivos de texto que o app lê (o resto de ideias/ são anexos)
 export const ehTexto = p => /(^|\/)(ideia|direcao)\.md$/.test(p) || RE_ITEM.test(p) || p === 'ideias/mapa-geral.json';
 
@@ -138,3 +156,24 @@ export function construir(files, anexos = []) {
 
 // algum pedido aberto nesta ideia ou dentro dela? (os pedidos das ferramentas da Edição contam à parte)
 export function temPedido(n) { return !!n.pedido || n.direcoes.some(temPedido); }
+
+// o que vai junto quando a ideia vai para a lixeira (o texto da confirmação)
+export function resumoParaLixeira(ideia) {
+  let direcoes = 0, anexos = ideia.anexos ? ideia.anexos.length : 0;
+  const andar = n => (n.direcoes || []).forEach(d => { direcoes++; anexos += d.anexos ? d.anexos.length : 0; andar(d); });
+  andar(ideia);
+  const itens = ideia.itens || [];
+  const conta = e => itens.filter(i => i.estado === e).length;
+  const edicao = conta('edicao'), kanban = conta('kanban'), concluidos = conta('feita');
+  const feitas = itens.concat([ideia]).reduce((s, x) => s + (x.plano && x.plano.feito ? x.plano.feito.tarefas.length : 0), 0);
+  const pl = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
+  const partes = [
+    direcoes && pl(direcoes, 'direção', 'direções'),
+    edicao && pl(edicao, 'item na Edição', 'itens na Edição'),
+    kanban && pl(kanban, 'item no Kanban', 'itens no Kanban'),
+    concluidos && pl(concluidos, 'item concluído', 'itens concluídos'),
+    feitas && pl(feitas, 'tarefa feita', 'tarefas feitas'),
+    anexos && pl(anexos, 'anexo', 'anexos')
+  ].filter(Boolean);
+  return { direcoes, edicao, kanban, concluidos, feitas, anexos, partes };
+}

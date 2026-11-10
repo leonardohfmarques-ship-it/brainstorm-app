@@ -243,6 +243,21 @@ textarea.notas:focus-visible{box-shadow:0 0 0 3px var(--lap)}
 .gv .res{margin:0 0 14px;font-size:15px;max-width:52ch}
 .gv .res mark{background:var(--lap);color:var(--ink);font:500 11px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:3px 6px;border-radius:3px;margin-right:6px;vertical-align:1px}
 .gv-empty{padding:28px 0;color:var(--gray);max-width:36ch}
+.gv .actions{display:flex;flex-wrap:wrap;gap:8px}
+/* lixeira (dentro da gaveta) */
+.lx{margin-top:26px;padding-top:18px;border-top:2px solid var(--ink)}
+.lx-t{display:flex;align-items:center;gap:8px;margin:0;font:800 20px/1 var(--sans)}
+.lx-t span{font:400 12px/1 var(--mono);color:var(--gray);letter-spacing:.06em}
+.lx-sub{margin:8px 0 0;color:var(--gray);font-size:14px;max-width:44ch}
+.gv--lixo h3{font-size:19px;color:var(--gray)}
+/* confirmação (Apagar ideia, Apagar de vez) */
+dialog.conf{border:2px solid var(--ink);border-radius:14px;background:var(--paper);color:var(--ink);padding:24px 26px 22px;max-width:min(460px,calc(100vw - 32px));box-shadow:6px 6px 0 var(--ink)}
+dialog.conf::backdrop{background:rgba(17,17,17,.28)}
+dialog.conf h2{margin:0 0 10px;font:800 22px/1.1 var(--sans)}
+dialog.conf p{margin:0 0 20px;font-size:15px;line-height:1.45}
+.conf-b{display:flex;flex-wrap:wrap;gap:10px}
+.btn--solid.btn--perigo{background:var(--yt);border-color:var(--yt);color:#fff}
+.btn--solid.btn--perigo:hover{background:var(--ink);border-color:var(--ink)}
 .toast{position:fixed;left:50%;top:calc(var(--top) + 16px);transform:translateX(-50%);background:var(--ink);color:var(--bg);font:500 14px/1 var(--sans);padding:12px 16px;border-radius:999px;z-index:40;display:flex;gap:8px;align-items:center;animation:toast .2s var(--out)}
 @keyframes toast{from{translate:0 12px;opacity:0}}
 

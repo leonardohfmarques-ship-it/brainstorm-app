@@ -205,6 +205,7 @@ export function criarEtapas(ctx) {
       <div class="actions">
         <button class="btn btn--sm" data-act="ver-mapa" title="Abre a ideia no mapa, nesta direção">${ICON.back}Ver no mapa</button>
         <button class="btn btn--sm btn--ghost btn--perigo" data-act="tirar" title="Tira só este item da Edição; a direção continua no mapa (dá para desfazer)">${ICON.trash}Tirar da Edição</button>
+        <button class="btn btn--sm btn--ghost btn--perigo" data-act="apagar-ideia" title="Manda a ideia inteira para a lixeira, com direções e itens (pergunta antes; dá para restaurar)">${ICON.trash}Apagar ideia</button>
       </div></header>`;
 
     // contexto herdado: o caminho sempre à vista; o texto de cada nível abre e fecha
@@ -385,6 +386,7 @@ export function criarEtapas(ctx) {
       const act = b.dataset.act;
       if (act === 'ver-mapa') ctx.verNoMapa(it);
       if (act === 'tirar') ctx.apagarItem(it);
+      if (act === 'apagar-ideia') ctx.apagarIdeia(it.ideia);
       if (act === 'kanban' && P.total(it.plano)) {
         // plano ou versão desatualizados: pergunta antes
         if (I.fecharVelho(atual()).length && confirmaFim !== it.key) {
@@ -625,6 +627,7 @@ export function criarEtapas(ctx) {
       <div class="actions">
         <button class="btn btn--sm" data-act="voltar-bs" title="A ideia volta para o mapa do Brainstorm">${ICON.back}Voltar ao Brainstorm</button>
         <button class="btn btn--sm btn--solid" data-act="kanban"${n ? '' : ' disabled'} title="${n ? 'As tarefas entram em A fazer' : 'Primeiro o plano: ele nasce no chat'}">${ICON.kanban}Mandar pro Kanban</button>
+        <button class="btn btn--sm btn--ghost btn--perigo" data-act="apagar-ideia" title="Manda a ideia inteira para a lixeira, com direções e itens (pergunta antes; dá para restaurar)">${ICON.trash}Apagar ideia</button>
       </div></header>`;
     h += `<div class="aviso aviso--antiga" role="note"><span class="lab">Jeito antigo · a ideia inteira</span>
       <p>Agora tu decide <b>uma direção de cada vez</b>: no mapa, cada direção tem “Decidir → Edição”, e ela chega aqui com o caminho até ela e as ferramentas novas.</p>
@@ -684,6 +687,7 @@ export function criarEtapas(ctx) {
     el.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', async () => {
       const act = b.dataset.act;
       if (act === 'voltar-bs') ctx.mudarEstado(i, 'ativa');
+      if (act === 'apagar-ideia') ctx.apagarIdeia(i);
       if (act === 'converter') ctx.converterAntiga(i);
       if (act === 'kanban' && n) ctx.mudarEstado(i, 'kanban');
       if (act === 'copiar') {
@@ -721,6 +725,7 @@ export function criarEtapas(ctx) {
         <button class="btn btn--sm" data-act="voltar-ed">${ICON.back}Voltar para Edição</button>
         ${feita ? `<button class="btn btn--sm btn--solid" data-act="reabrir">${ICON.kanban}Reabrir no Kanban</button>`
           : `<button class="btn btn--sm${n && feitos === n ? ' btn--solid' : ''}" data-act="concluir"${n && feitos === n ? '' : ' disabled'} title="${n && feitos === n ? 'Tudo feito: marca como concluída' : 'Libera quando tudo estiver em Feito'}">${ICON.check}${i.kind === 'item' ? 'Concluir' : 'Concluir ideia'}</button>`}
+        <button class="btn btn--sm btn--ghost btn--perigo" data-act="apagar-ideia" title="Manda a ideia inteira para a lixeira, com direções e itens (pergunta antes; dá para restaurar)">${ICON.trash}Apagar ideia</button>
       </div></header>`;
     // plano desatualizado (foi para cá assim): marca à vista e o Concluir pergunta antes
     const kbVelho = i.kind === 'item' ? I.fecharVelho(i) : [];
@@ -764,6 +769,7 @@ export function criarEtapas(ctx) {
     el.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => {
       const act = b.dataset.act;
       if (act === 'voltar-ed') ctx.mudarEstado(i, 'edicao');
+      if (act === 'apagar-ideia') ctx.apagarIdeia(i.kind === 'item' ? i.ideia : i);
       if (act === 'concluir' && n && feitos === n) {
         if (kbVelho.length && confirmaFim !== i.key) { confirmaFim = i.key; renderKanban(); const s = el.querySelector('[data-act="concluir-sim"]'); if (s) s.focus(); return; }
         confirmaFim = null; ctx.mudarEstado(i, 'feita');

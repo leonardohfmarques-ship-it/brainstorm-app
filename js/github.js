@@ -1,7 +1,7 @@
 // Backend de produção: lê e grava no repositório privado pela API do GitHub.
 // A chave (token) só vai para api.github.com, nunca para outro lugar, e nunca aparece em log.
 
-import { ehTexto } from './modelo.js';
+import { ehTexto, RE_LIXO } from './modelo.js';
 
 const API = 'https://api.github.com';
 
@@ -108,7 +108,8 @@ export class GitHubBackend {
 
   async load() {
     const tree = await this.api(`${this.raiz}/git/trees/${encodeURIComponent(this.branch)}?recursive=1`);
-    const itens = (tree.tree || []).filter(t => t.type === 'blob' && t.path.startsWith('ideias/'));
+    // da lixeira, só o ideia.md de cada uma (para a lista); o resto dela o app não lê
+    const itens = (tree.tree || []).filter(t => t.type === 'blob' && (t.path.startsWith('ideias/') || RE_LIXO.test(t.path)));
     this.indice = new Map(itens.map(t => [t.path, { sha: t.sha, size: t.size }]));
     const textos = itens.filter(t => ehTexto(t.path));
     const cache = lerCache(), usados = {};
@@ -170,6 +171,45 @@ export class GitHubBackend {
       }
       for (const i of alvos) this.indice.delete(i.path);
       return { apagados: alvos.length };
+    }
+    throw new ErroAPI('conflito', 'O GitHub mudou várias vezes seguidas. Tenta de novo.');
+  }
+
+  // move uma pasta inteira (lixeira e restaurar) num commit só: cada arquivo sai de "de" e entra em "para" com o
+  // mesmo conteúdo (o mesmo blob); conteudos = { caminho relativo: texto } troca ou cria arquivos no destino
+  // (o ideia.md com "apagada:", mudanças ainda não enviadas). Lê a árvore na hora, como o apagar.
+  async mover(de, para, message, conteudos = {}) {
+    const pd = String(de).replace(/\/+$/, '') + '/', pp = String(para).replace(/\/+$/, '') + '/';
+    const ramo = encodeURIComponent(this.branch);
+    for (let t = 0; t < 3; t++) {
+      const ref = await this.api(`${this.raiz}/git/ref/heads/${ramo}`);
+      const head = ref.object.sha;
+      const commit = await this.api(`${this.raiz}/git/commits/${head}`);
+      const tree = await this.api(`${this.raiz}/git/trees/${commit.tree.sha}?recursive=1`);
+      if (tree.truncated) throw new ErroAPI('outro', 'O repositório ficou grande demais para mover por aqui.');
+      const blobs = (tree.tree || []).filter(i => i.type === 'blob');
+      const alvos = blobs.filter(i => i.path.startsWith(pd));
+      if (!alvos.length) return { movidos: 0 }; // já foi (ou nunca existiu)
+      if (blobs.some(i => i.path.startsWith(pp))) throw new ErroAPI('outro', 'Já existe uma pasta com esse nome no destino.');
+      const feitos = new Set();
+      const entradas = [];
+      for (const i of alvos) {
+        const rel = i.path.slice(pd.length);
+        entradas.push({ path: i.path, mode: i.mode || '100644', type: 'blob', sha: null });
+        if (rel in conteudos) { entradas.push({ path: pp + rel, mode: '100644', type: 'blob', content: conteudos[rel] }); feitos.add(rel); }
+        else entradas.push({ path: pp + rel, mode: i.mode || '100644', type: 'blob', sha: i.sha });
+      }
+      for (const [rel, text] of Object.entries(conteudos)) if (!feitos.has(rel)) entradas.push({ path: pp + rel, mode: '100644', type: 'blob', content: text });
+      const nova = await this.api(`${this.raiz}/git/trees`, { method: 'POST', body: { base_tree: commit.tree.sha, tree: entradas } });
+      const c = await this.api(`${this.raiz}/git/commits`, { method: 'POST', body: { message, tree: nova.sha, parents: [head] } });
+      try {
+        await this.api(`${this.raiz}/git/refs/heads/${ramo}`, { method: 'PATCH', body: { sha: c.sha, force: false } });
+      } catch (e) {
+        if (e.status === 422 || e.tipo === 'conflito') continue;
+        throw e;
+      }
+      for (const i of alvos) { const v = this.indice.get(i.path); this.indice.delete(i.path); if (v) this.indice.set(pp + i.path.slice(pd.length), v); }
+      return { movidos: alvos.length };
     }
     throw new ErroAPI('conflito', 'O GitHub mudou várias vezes seguidas. Tenta de novo.');
   }

@@ -1,7 +1,7 @@
 // Guarda os arquivos em memória, aplica as mudanças na hora (otimista) e manda para o backend
 // numa fila serial com espera de 800 ms. Conflito: busca o arquivo de novo e reaplica só o que mudou.
 import { aplicar as aplicarMd, juntar as juntarMd } from './formato.js';
-import { construir } from './modelo.js';
+import { construir, lerLixeira } from './modelo.js';
 
 export const MAPA = 'ideias/mapa-geral.json';
 const ESPERA = 800;
@@ -53,7 +53,8 @@ export class Store {
     this.voando = false; this.timer = 0; this.retry = 0;
     this.ouvintes = new Set();
     this.ocultos = new Set(); // pastas que somem da tela enquanto o "Desfazer" está valendo
-    this.model = { ideias: [], erros: [], porBase: new Map() };
+    this.model = { ideias: [], itens: [], erros: [], porBase: new Map() }; // itens: tecla 2/3 antes de carregar quebrava
+    this.lixeira = [];        // ideias na lixeira (lerLixeira)
   }
   on(fn) { this.ouvintes.add(fn); return () => this.ouvintes.delete(fn); }
   emit(tipo, extra) { this.ouvintes.forEach(fn => { try { fn(tipo, extra); } catch (e) { setTimeout(() => { throw e; }); } }); }
@@ -70,6 +71,7 @@ export class Store {
   reconstruir() {
     const m = new Map([...this.files].filter(([p]) => !this.oculto(p)).map(([p, f]) => [p, { text: f.text }]));
     this.model = construir(m, this.anexos.filter(a => !this.oculto(a.path)));
+    this.lixeira = lerLixeira(m);
     let mapa = {};
     const f = this.files.get(MAPA);
     if (f) { try { mapa = JSON.parse(f.text) || {}; } catch (e) { mapa = {}; } }
@@ -121,6 +123,27 @@ export class Store {
     this.anotarApagar(base, msg);
     this.reconstruir(); this.agendar();
   }
+  // move uma pasta inteira (ideia para a lixeira, ou de volta): na tela vale na hora; vai num commit só.
+  // conteudos = { caminho relativo: texto } troca arquivos no destino; o que tem mudança ainda não enviada vai junto.
+  moverPasta(de, para, msg, conteudos = {}) {
+    const pd = de + '/', pp = para + '/';
+    const extra = Object.assign({}, conteudos);
+    for (const p of [...this.files.keys()]) {
+      if (!p.startsWith(pd)) continue;
+      const f = this.files.get(p), rel = p.slice(pd.length);
+      if (!(rel in extra) && f.text !== f.remoto) extra[rel] = f.text;  // mudança local que ainda não subiu
+      const text = rel in extra ? extra[rel] : f.text;
+      this.files.delete(p);
+      this.files.set(pp + rel, { text, remoto: text, sha: null });
+    }
+    for (const p of [...this.pend.keys()]) if (p.startsWith(pd)) this.pend.delete(p);
+    this.anexos = this.anexos.map(a => a.path.startsWith(pd) ? Object.assign({}, a, { path: pp + a.path.slice(pd.length) }) : a);
+    this.ocultos.delete(de);
+    this.pend.set('mover:' + de, { mover: { de, para, conteudos: extra }, patch: null, msgs: [msg] });
+    this.anotarApagar(de, msg, { para, conteudos: extra });
+    this.reconstruir(); this.agendar();
+  }
+
   // direção que nunca foi para o backend (nome ainda aberto): some da memória e nada vai para a fila
   descartar(path) {
     this.files.delete(path); this.pend.delete(path);
@@ -136,15 +159,16 @@ export class Store {
     if (!this.memoria) return;
     try { if (l.length) this.memoria.setItem(this.chave, JSON.stringify(l)); else this.memoria.removeItem(this.chave); } catch (e) { /* nada */ }
   }
-  anotarApagar(base, msg) { this.guardarPendentes(this.apagarPendentes().filter(x => x.base !== base).concat({ base, msg })); }
+  anotarApagar(base, msg, mover = null) { this.guardarPendentes(this.apagarPendentes().filter(x => x.base !== base).concat(mover ? { base, msg, para: mover.para, conteudos: mover.conteudos } : { base, msg })); }
   esquecerApagar(base) { this.guardarPendentes(this.apagarPendentes().filter(x => x.base !== base)); }
   // depois de carregar: o que ficou anotado e ainda existe volta para a fila; o que já sumiu sai da lista
   retomarApagar() {
     const feitos = [];
-    for (const { base, msg } of this.apagarPendentes()) {
+    for (const { base, msg, para, conteudos } of this.apagarPendentes()) {
       const existe = [...this.files.keys()].some(p => p.startsWith(base + '/')) || this.anexos.some(a => a.path.startsWith(base + '/'));
       if (!existe) { this.esquecerApagar(base); continue; }
-      this.apagarPasta(base, msg || `App: apaga ${base}`);
+      if (para) this.moverPasta(base, para, msg || `App: move ${base}`, conteudos || {});
+      else this.apagarPasta(base, msg || `App: apaga ${base}`);
       feitos.push(base);
     }
     return feitos;
@@ -171,7 +195,7 @@ export class Store {
         if (e.tipo !== 'naoexiste') {
           const cur = this.pend.get(path);
           this.pend.delete(path);
-          this.pend.set(path, cur && !job.apagar ? { patch: juntar(job.patch, cur.patch), criar: job.criar || cur.criar, inicial: job.inicial || cur.inicial, msgs: job.msgs.concat(cur.msgs) } : job);
+          this.pend.set(path, cur && !job.apagar && !job.mover ? { patch: juntar(job.patch, cur.patch), criar: job.criar || cur.criar, inicial: job.inicial || cur.inicial, msgs: job.msgs.concat(cur.msgs) } : job);
         }
         falha = e; break;
       }
@@ -187,6 +211,7 @@ export class Store {
 
   async enviar(path, job) {
     if (job.apagar) { await this.b.apagar(job.apagar, mensagem(job.msgs)); this.esquecerApagar(job.apagar); return; }
+    if (job.mover) { const m = job.mover; await this.b.mover(m.de, m.para, mensagem(job.msgs), m.conteudos); this.esquecerApagar(m.de); return; }
     const f = this.files.get(path); if (!f) return;
     const msg = mensagem(job.msgs.length ? job.msgs : ['App: atualiza ' + path]);
     for (let t = 0; t < 3; t++) {

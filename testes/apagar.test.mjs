@@ -6,7 +6,8 @@ import { GitHubBackend, paraB64 } from '../js/github.js';
 import { LocalBackend } from '../js/local.js';
 import { Store } from '../js/sync.js';
 import { fimDoNome, descreverClique, seletorDoClique } from '../js/arvore.js';
-import { novaDirecao } from '../js/formato.js';
+import { novaDirecao, aplicar as aplicarMd } from '../js/formato.js';
+import { construir, lerLixeira, resumoParaLixeira, naLixeira } from '../js/modelo.js';
 
 const TOKEN = 'github_pat_FALSO_456';
 const sha = t => createHash('sha1').update(t).digest('hex');
@@ -35,7 +36,12 @@ function repoFalso(inicial) {
     if (p === '/git/trees' && metodo === 'POST') {
       const b = JSON.parse(opts.body); const base = arvores.get(b.base_tree); if (!base) return json(422, { message: 'base_tree inválida' });
       const nova = new Map(base);
-      for (const e of b.tree) { if (e.sha !== null) return json(422, { message: 'só apagar' }); if (!nova.has(e.path)) return json(422, { message: 'path não existe' }); nova.delete(e.path); }
+      const porSha = h => { for (const arv of arvores.values()) for (const t of arv.values()) if (sha(t) === h) return t; return null; };
+      for (const e of b.tree) {
+        if (e.sha === null) { if (!nova.has(e.path)) return json(422, { message: 'path não existe' }); nova.delete(e.path); }
+        else if (e.content != null) nova.set(e.path, e.content);
+        else { const t = porSha(e.sha); if (t == null) return json(422, { message: 'blob não existe' }); nova.set(e.path, t); }
+      }
       return json(201, { sha: guardarArvore(nova) });
     }
     if (p === '/git/commits' && metodo === 'POST') {
@@ -253,4 +259,133 @@ test('clique com nome aberto: botões por id, campos e o que não tem como achar
   assert.equal(seletorDoClique(descreverClique(elFalso('button', ['x'], { 'data-id': 'a"b' })), DE, PARA), 'button.x[data-id="a\\"b"]', 'aspas escapadas');
   // sem nome novo (falhou ao criar), nada é trocado
   assert.equal(seletorDoClique(descreverClique(elFalso('button', ['tab'], { 'data-id': DE })), DE, DE), `button.tab[data-id="${DE}"]`);
+});
+
+/* ---------------- lixeira de ideias (decisão de 09/11/2026: apagar a ideia inteira, com confirmação e lixeira) ---------------- */
+const ITEM = e => `---\ntitulo: Ponta\norigem: direcoes/boa\nestado: ${e}\ncriado: 2026-11-01\n---\n\n## Contexto\nx\n\n## Plano\n\n### A fazer\n- [ ] Uma\n\n### Fazendo\n\n### Feito\n- [x] Duas\n`;
+const comEtapas = { ...inicial,
+  [`${Q}/decididas/na-edicao/item.md`]: ITEM('edicao'),
+  [`${Q}/decididas/no-kanban/item.md`]: ITEM('kanban'),
+  [`${Q}/decididas/concluido/item.md`]: ITEM('feita') };
+const L = naLixeira(Q);
+const marcar = t => aplicarMd(t, { fm: { apagada: '2026-11-09' } });
+
+test('lixeira: o que vai junto conta direções, itens de cada etapa, tarefas feitas e anexos', () => {
+  const m = construir(new Map(Object.entries(comEtapas).filter(([p]) => !p.includes('/anexos/')).map(([p, t]) => [p, { text: t }])), [{ path: `${Q}/direcoes/ruim/anexos/foto.png` }]);
+  const r = resumoParaLixeira(m.ideias.find(i => i.key === 'youtube/quadro'));
+  assert.deepEqual([r.direcoes, r.edicao, r.kanban, r.concluidos, r.feitas, r.anexos], [4, 1, 1, 1, 3, 1]);
+  assert.deepEqual(r.partes, ['4 direções', '1 item na Edição', '1 item no Kanban', '1 item concluído', '3 tarefas feitas', '1 anexo']);
+});
+
+test('lixeira: GitHub move a ideia inteira (direções, itens da Edição e do Kanban, anexos) num commit só, sem forçar', async () => {
+  const r = repoFalso(comEtapas); const b = novo(r);
+  const res = await b.mover(Q, L, 'App: manda a ideia "Exemplo" para a lixeira', { 'ideia.md': marcar(IDEIA) });
+  assert.equal(res.movidos, 9);
+  assert.ok(![...r.files.keys()].some(p => p.startsWith(Q + '/')), 'nada sobra em ideias/');
+  assert.equal(r.files.get(`${L}/decididas/no-kanban/item.md`), ITEM('kanban'), 'item do Kanban vai junto, intacto');
+  assert.equal(r.files.get(`${L}/decididas/na-edicao/item.md`), ITEM('edicao'));
+  assert.equal(r.files.get(`${L}/direcoes/ruim/anexos/foto.png`), '\x89PNG', 'anexo vai com o mesmo conteúdo');
+  assert.match(r.files.get(`${L}/ideia.md`), /^apagada: 2026-11-09$/m);
+  assert.equal(r.files.get('ideias/soltas/outra/ideia.md'), IDEIA, 'outra ideia não muda');
+  const patch = r.log.filter(l => l.metodo === 'PATCH');
+  assert.equal(patch.length, 1); assert.equal(JSON.parse(patch[0].body).force, false);
+  // destino ocupado: recusa em vez de misturar
+  const r2 = repoFalso({ [`${Q}/ideia.md`]: IDEIA, [`${L}/ideia.md`]: IDEIA });
+  await assert.rejects(novo(r2).mover(Q, L, 'App: x'), /Já existe/);
+  // pasta que não existe: nada de commit
+  const r3 = repoFalso(inicial);
+  assert.deepEqual(await novo(r3).mover('ideias/youtube/nao-tem', 'lixeira/ideias/youtube/nao-tem', 'App: x'), { movidos: 0 });
+  assert.equal(r3.log.filter(l => l.metodo !== 'GET').length, 0);
+});
+
+test('lixeira: Store manda para a lixeira (some do mapa e das etapas na hora), restaura e apaga de vez', async () => {
+  const r = repoFalso(comEtapas); const s = new Store(novo(r)); await s.carregar();
+  const ideia = () => s.model.ideias.find(i => i.key === 'youtube/quadro');
+  // mudança ainda não enviada dentro da ideia vai junto para a lixeira (sem PUT avulso)
+  s.remendar(`${Q}/direcoes/boa/direcao.md`, { sec: { 'Bruto/Anotações': 'nota nova' } }, 'App: anotações');
+  s.moverPasta(Q, L, 'App: manda a ideia "Exemplo" para a lixeira', { 'ideia.md': marcar(s.texto(`${Q}/ideia.md`)) });
+  assert.equal(ideia(), undefined, 'sumiu do mapa');
+  assert.equal(s.model.itens.filter(i => i.key.startsWith('youtube/quadro/')).length, 0, 'sumiu da Edição e do Kanban');
+  assert.deepEqual(s.lixeira.map(x => [x.base, x.orig, x.titulo, x.apagada]), [[L, Q, 'Exemplo', '2026-11-09']]);
+  await s.agora(); clearTimeout(s.timer);
+  assert.equal(r.log.filter(l => l.metodo === 'PUT').length, 0);
+  assert.match(r.files.get(`${L}/direcoes/boa/direcao.md`), /nota nova/);
+  assert.ok(![...r.files.keys()].some(p => p.startsWith(Q + '/')));
+  // recarregar: continua na lixeira, fora do mapa
+  await s.carregar();
+  assert.equal(ideia(), undefined); assert.equal(s.lixeira.length, 1);
+  assert.ok(![...s.files.keys()].some(p => p.startsWith(L + '/') && !p.endsWith(L + '/ideia.md')), 'da lixeira só o ideia.md é lido');
+  // restaurar: volta inteira para o lugar, sem a marca
+  s.moverPasta(L, Q, 'App: restaura a ideia "Exemplo" da lixeira', { 'ideia.md': aplicarMd(s.texto(`${L}/ideia.md`), { fm: { apagada: null } }) });
+  assert.ok(ideia()); assert.equal(s.lixeira.length, 0);
+  await s.agora(); clearTimeout(s.timer);
+  assert.equal(r.files.get(`${Q}/ideia.md`), IDEIA, 'ideia.md igual ao de antes');
+  assert.equal(r.files.get(`${Q}/decididas/no-kanban/item.md`), ITEM('kanban'));
+  await s.carregar();
+  assert.equal(ideia().itens.length, 3, 'itens de volta nas etapas');
+  // apagar de vez: só pela lixeira
+  s.moverPasta(Q, L, 'App: lixeira', { 'ideia.md': marcar(s.texto(`${Q}/ideia.md`)) });
+  await s.agora(); clearTimeout(s.timer);
+  s.apagarPasta(L, 'App: apaga de vez a ideia "Exemplo" (estava na lixeira)');
+  assert.equal(s.lixeira.length, 0);
+  await s.agora(); clearTimeout(s.timer);
+  assert.ok(![...r.files.keys()].some(p => p.startsWith(L + '/') || p.startsWith(Q + '/')), 'nada sobra no repositório');
+  assert.equal(r.files.get('ideias/soltas/outra/ideia.md'), IDEIA);
+});
+
+test('lixeira: recarregar antes do envio termina de mandar para a lixeira (com a marca da data)', async () => {
+  const r = repoFalso(comEtapas); const mem = memoriaFalsa();
+  const s1 = new Store(novo(r), { memoria: mem }); await s1.carregar();
+  s1.moverPasta(Q, L, 'App: lixeira', { 'ideia.md': marcar(IDEIA) });
+  clearTimeout(s1.timer);
+  assert.ok(r.files.has(`${Q}/ideia.md`), 'ainda não foi');
+  const s2 = new Store(novo(r), { memoria: mem }); await s2.carregar();
+  assert.deepEqual(s2.retomarApagar(), [Q]);
+  await s2.agora(); clearTimeout(s2.timer);
+  assert.match(r.files.get(`${L}/ideia.md`), /apagada: 2026-11-09/);
+  assert.ok(!r.files.has(`${Q}/ideia.md`));
+  assert.equal(mem.getItem('bs-apagar-pendente'), null);
+});
+
+test('lixeira é ignorada pelo mapa: nenhuma ideia, direção, item ou erro vem de lixeira/', () => {
+  const files = new Map([
+    ['ideias/soltas/outra/ideia.md', { text: IDEIA }],
+    [`${L}/ideia.md`, { text: marcar(IDEIA) }],
+    [`${L}/direcoes/boa/direcao.md`, { text: DIR('Boa') }],
+    [`${L}/decididas/no-kanban/item.md`, { text: ITEM('kanban') }]
+  ]);
+  const m = construir(files, [{ path: `${L}/anexos/a.png` }]);
+  assert.deepEqual(m.ideias.map(i => i.key), ['soltas/outra']);
+  assert.equal(m.itens.length, 0); assert.deepEqual(m.erros, []);
+  assert.equal(lerLixeira(files).length, 1);
+});
+
+test('lixeira no modo local: manda, recarrega, restaura e apaga de vez, sem tocar nos arquivos', async () => {
+  const arquivos = { ...comEtapas };
+  const mem = navegadorFalso(arquivos);
+  const listar = async function (dir) { return Object.keys(arquivos).filter(p => p.startsWith(dir)); };
+  const existe = async dir => Object.keys(arquivos).some(p => p.startsWith(dir.replace(/\/+$/, '') + '/'));
+  const abrir = async () => { const b = new LocalBackend({ atraso: 0 }); b.listar = listar; b.existe = existe; const s = new Store(b); await s.carregar(); return s; };
+  let s = await abrir();
+  s.moverPasta(Q, L, 'App: lixeira', { 'ideia.md': marcar(s.texto(`${Q}/ideia.md`)) });
+  await s.agora(); clearTimeout(s.timer);
+  s = await abrir();
+  assert.equal(s.model.ideias.find(i => i.key === 'youtube/quadro'), undefined);
+  assert.equal(s.lixeira.length, 1);
+  assert.equal(arquivos[`${Q}/ideia.md`], IDEIA, 'arquivo de verdade intacto');
+  assert.equal(JSON.parse(mem.get('bs-local-overlay'))[`${L}/decididas/no-kanban/item.md`], ITEM('kanban'), 'item do Kanban foi junto para a lixeira');
+  s.moverPasta(L, Q, 'App: restaura', { 'ideia.md': aplicarMd(s.texto(`${L}/ideia.md`), { fm: { apagada: null } }) });
+  await s.agora(); clearTimeout(s.timer);
+  s = await abrir();
+  assert.ok(s.model.ideias.find(i => i.key === 'youtube/quadro'));
+  assert.equal(s.model.ideias.find(i => i.key === 'youtube/quadro').itens.length, 3);
+  assert.equal(s.lixeira.length, 0);
+  s.moverPasta(Q, L, 'App: lixeira', { 'ideia.md': marcar(s.texto(`${Q}/ideia.md`)) });
+  await s.agora(); clearTimeout(s.timer);
+  s.apagarPasta(L, 'App: apaga de vez');
+  await s.agora(); clearTimeout(s.timer);
+  s = await abrir();
+  assert.equal(s.lixeira.length, 0);
+  assert.equal(s.model.ideias.find(i => i.key === 'youtube/quadro'), undefined);
+  assert.ok(mem);
 });

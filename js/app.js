@@ -4,7 +4,7 @@ import { GitHubBackend } from './github.js';
 import { Sessao, escolherInicio, consumirFragmento, enderecoWorker, linkEntrar, esquecer } from './sessao.js';
 import { LocalBackend } from './local.js';
 import { Store, APAGAR_PENDENTE } from './sync.js';
-import { AREAS, AREA, temPedido } from './modelo.js';
+import { AREAS, AREA, temPedido, naLixeira, resumoParaLixeira } from './modelo.js';
 import { slug as fazerSlug, novaDirecao, rebaixar } from './formato.js';
 import { md, hidratar } from './markdown.js';
 import { criarEtapas, nomeEtapa } from './etapas.js';
@@ -781,7 +781,7 @@ function renderBody(anim) {
   h += `<h1 class="ph" id="ph">${esc(target.titulo)}</h1>`;
   if (targetIsIdea) {
     h += `<p class="pmeta">${ideaCode(idea) ? `<b>${esc(ideaCode(idea))}</b>` : ''}<span>${esc(areaNome(idea.area))}</span>${idea.criada ? `<span>criada ${fmtData(idea.criada)}</span>` : ''}<span>ativa</span>${idea.pedido ? '<span>pedido ao Claude</span>' : ''}${idea.itens.length ? `<span>${plural(idea.itens.length, 'decidida', 'decididas')}</span>` : ''}</p>`;
-    h += `<div class="actions"><button class="btn btn--sm" data-act="renomear">${ICON.pen}Renomear</button><button class="btn btn--sm" data-act="guardar">${ICON.drawer}Guardar na gaveta</button>${botaoDecidir(idea, 'a ideia inteira')}</div>`;
+    h += `<div class="actions"><button class="btn btn--sm" data-act="renomear">${ICON.pen}Renomear</button><button class="btn btn--sm" data-act="guardar">${ICON.drawer}Guardar na gaveta</button>${botaoDecidir(idea, 'a ideia inteira')}<button class="btn btn--sm btn--ghost btn--perigo" data-act="apagar-ideia" title="Manda a ideia inteira para a lixeira, com direções e itens (pergunta antes; dá para restaurar)">${ICON.trash}Apagar ideia</button></div>`;
   } else {
     h += `<p class="pmeta"><b>${esc(codigoDir(idea, tcode))}</b><span>${ix.length > 1 ? `direção · nível ${ix.length}` : 'direção'}</span>${tkids.length ? `<span>${tkids.length} direções dentro</span>` : ''}${!target.lapidado ? '<span>criada por ti</span>' : ''}</p>`;
     h += `<div class="actions">${botaoDecidir(target, 'esta direção')}<button class="btn btn--sm" data-act="renomear">${ICON.pen}Renomear</button>${tkids.length ? `<button class="btn btn--sm" data-act="galhos" aria-expanded="${aberta}">${aberta ? ICON.cima + 'Fechar galhos' : ICON.baixo + 'Abrir galhos'}</button>` : ''}<button class="btn btn--sm btn--perigo" data-act="apagar" title="Some do mapa na hora; dá para desfazer por alguns segundos">${ICON.trash}Apagar direção</button></div>`;
@@ -867,6 +867,7 @@ function bindBody(pin, target, targetIsIdea, d) {
     if (a === 'guardar') guardar(target);
     if (a === 'decidir') decidir(target);
     if (a === 'apagar') apagarDirecao(target);
+    if (a === 'apagar-ideia') mandarParaLixeira(target);
     if (a === 'editar-lap') { lapEditando = file; renderBody(false); const c = $('#lapCru'); if (c) { c.focus(); c.setSelectionRange(0, 0); } }
     if (a === 'fechar-lap') { lapEditando = null; renderBody(false); }
     if (a === 'desenvolver') {
@@ -1092,6 +1093,59 @@ function apagarItem(it) {
   } });
 }
 
+/* ---------------- lixeira (decisão dele de 09/11/2026) ----------------
+   "Apagar ideia" pergunta antes e manda a pasta inteira (direções, itens da Edição e do Kanban, anexos) para
+   lixeira/ideias/<area>/<ideia>/ num commit só. Na Gaveta, a Lixeira restaura ou apaga de vez. */
+function confirmar({ titulo, texto, ok, cancelar = 'Cancelar' }) {
+  return new Promise(res => {
+    const d = document.createElement('dialog');
+    d.className = 'conf'; d.setAttribute('aria-labelledby', 'confT'); d.setAttribute('aria-describedby', 'confX');
+    d.innerHTML = `<h2 id="confT">${esc(titulo)}</h2><p id="confX">${texto}</p><div class="conf-b"><button class="btn btn--sm btn--solid btn--perigo" data-r="1">${ICON.trash}${esc(ok)}</button><button class="btn btn--sm btn--ghost" data-r="0">${esc(cancelar)}</button></div>`;
+    let r = false;
+    d.querySelectorAll('[data-r]').forEach(b => b.addEventListener('click', () => { r = b.dataset.r === '1'; d.close(); }));
+    d.addEventListener('close', () => { d.remove(); res(r); });
+    document.body.appendChild(d); d.showModal();
+    d.querySelector('[data-r="0"]').focus(); // o foco começa no Cancelar: Enter sem querer não apaga
+  });
+}
+const naTelaDaIdeia = (key, k) => !!k && (k === key || k.startsWith(key + '/'));
+async function mandarParaLixeira(idea) {
+  if (!idea || idea.kind !== 'ideia' || busy) return;
+  if (renaming) renaming.input.blur();
+  efetivarAdiado();
+  const r = resumoParaLixeira(idea);
+  const junto = r.partes.length ? `Vai junto: ${r.partes.join(', ')}.` : 'Ela não tem direções nem itens.';
+  const sim = await confirmar({ titulo: `Mandar “${idea.titulo}” para a lixeira?`, texto: `${esc(junto)} Dá para restaurar pela Lixeira, na Gaveta.`, ok: 'Mandar para a lixeira' });
+  if (!sim) return;
+  const atual = ideiaPorKey(idea.key); if (!atual) return; // sumiu enquanto ele pensava
+  let para = naLixeira(atual.base), k = 2;
+  while (store.lixeira.some(x => x.base === para) || [...store.files.keys()].some(p => p.startsWith(para + '/'))) para = naLixeira(atual.base) + '-' + k++;
+  const titulo = atual.titulo, key = atual.key;
+  store.moverPasta(atual.base, para, `App: manda a ideia "${titulo}" para a lixeira`, { 'ideia.md': aplicarMd(store.texto(atual.file), { fm: { apagada: hojeISO() } }) });
+  if (UI.path[0] === key) { UI.path = []; UI.sel = null; }
+  if (naTelaDaIdeia(key, UI.ed)) UI.ed = null;
+  if (naTelaDaIdeia(key, UI.kb)) UI.kb = null;
+  saveUI(); renderAll({ keep: true });
+  toast(`Na lixeira: “${titulo}”.`, { acao: 'Desfazer', ms: DESFAZER_MS, fn: () => { const x = store.lixeira.find(l => l.base === para); if (x) restaurar(x); } });
+}
+function restaurar(x) {
+  if (!x || busy) return;
+  let dest = x.orig, k = 2;
+  while (M().porBase.has(dest) || [...store.files.keys()].some(p => p.startsWith(dest + '/'))) dest = x.orig + '-' + k++;
+  const arq = x.base + '/ideia.md';
+  store.moverPasta(x.base, dest, `App: restaura a ideia "${x.titulo}" da lixeira`, { 'ideia.md': aplicarMd(store.texto(arq), { fm: { apagada: null } }) });
+  renderAll({ keep: true });
+  toast(`Restaurada: “${x.titulo}”. Voltou para onde estava.`);
+}
+async function apagarDeVez(x) {
+  if (!x || busy) return;
+  const sim = await confirmar({ titulo: `Apagar “${x.titulo}” de vez?`, texto: 'Sai da lixeira e do repositório, com tudo o que tinha dentro. O app não traz de volta.', ok: 'Apagar de vez' });
+  if (!sim || !store.lixeira.some(l => l.base === x.base)) return;
+  store.apagarPasta(x.base, `App: apaga de vez a ideia "${x.titulo}" (estava na lixeira)`);
+  renderGaveta();
+  toast(`Apagada de vez: “${x.titulo}”.`);
+}
+
 /* ---------------- gaveta ---------------- */
 const sheet = $('#sheet'), scrim = $('#scrim');
 let lastFocus = null;
@@ -1101,14 +1155,27 @@ function renderGaveta() {
   $('#gvCount').textContent = list.length;
   $('#sheetSub').textContent = list.length ? `${list.length} ${list.length > 1 ? 'ideias guardadas' : 'ideia guardada'} · fora do mapa` : 'nada guardado';
   const b = $('#sheetB');
-  if (!list.length) { b.innerHTML = `<p class="gv-empty">Gaveta vazia. Ideia guardada sai do mapa e espera aqui até voltar.</p>`; return; }
+  const lixo = store ? store.lixeira : [];
+  const lixeiraHTML = `<section class="lx" aria-labelledby="lxT"><h3 class="lx-t" id="lxT">${ICON.trash}Lixeira <span>${lixo.length}</span></h3>`
+    + (lixo.length ? `<p class="lx-sub">Ideias apagadas, com tudo o que tinham. Ficam aqui até tu restaurar ou apagar de vez.</p>` + lixo.map(x => {
+      const a = AREA[x.area] || AREA.soltas;
+      return `<article class="gv gv--lixo"><div class="gv-top"><span class="bul" style="--c:${a.c}">${a.b}</span><span class="pmeta" style="margin:0"><span>${esc(a.nome)}</span>${x.apagada ? `<span>apagada ${fmtData(x.apagada)}</span>` : ''}</span></div>
+        <h3>${esc(x.titulo)}</h3><div class="actions"><button class="btn btn--sm btn--solid" data-restaurar="${esc(x.base)}">${ICON.back}Restaurar</button><button class="btn btn--sm btn--ghost btn--perigo" data-devez="${esc(x.base)}">${ICON.trash}Apagar de vez</button></div></article>`;
+    }).join('') : `<p class="gv-empty">Lixeira vazia.</p>`) + `</section>`;
+  const ligarLixeira = () => {
+    b.querySelectorAll('[data-restaurar]').forEach(btn => btn.addEventListener('click', () => { restaurar(store.lixeira.find(x => x.base === btn.dataset.restaurar)); renderGaveta(); }));
+    b.querySelectorAll('[data-devez]').forEach(btn => btn.addEventListener('click', () => apagarDeVez(store.lixeira.find(x => x.base === btn.dataset.devez))));
+    b.querySelectorAll('[data-lixo]').forEach(btn => btn.addEventListener('click', async () => { await mandarParaLixeira(ideiaPorKey(btn.dataset.lixo)); renderGaveta(); }));
+  };
+  if (!list.length) { b.innerHTML = `<p class="gv-empty">Gaveta vazia. Ideia guardada sai do mapa e espera aqui até voltar.</p>` + lixeiraHTML; ligarLixeira(); return; }
   b.innerHTML = list.map(i => {
     const a = AREA[i.area];
     return `<article class="gv"><div class="gv-top"><span class="bul" style="--c:${a.c}">${a.b}</span><span class="pmeta" style="margin:0">${ideaCode(i) ? `<b>${esc(ideaCode(i))}</b>` : ''}<span>${esc(a.nome)}</span>${i.criada ? `<span>criada ${fmtData(i.criada)}</span>` : ''}</span></div>
       <h3>${esc(i.titulo)}</h3>${i.resumo ? `<p class="res"><mark>lapidado</mark>${esc(i.resumo.replace(/\s+/g, ' '))}</p>` : ''}
-      <button class="btn btn--sm btn--solid" data-reativar="${esc(i.key)}">${ICON.back}Reativar</button></article>`;
-  }).join('');
+      <div class="actions"><button class="btn btn--sm btn--solid" data-reativar="${esc(i.key)}">${ICON.back}Reativar</button><button class="btn btn--sm btn--ghost btn--perigo" data-lixo="${esc(i.key)}" title="Manda a ideia inteira para a lixeira (pergunta antes; dá para restaurar)">${ICON.trash}Apagar ideia</button></div></article>`;
+  }).join('') + lixeiraHTML;
   b.querySelectorAll('[data-reativar]').forEach(btn => btn.addEventListener('click', () => reativar(btn.dataset.reativar)));
+  ligarLixeira();
 }
 function openGaveta() { closeAtalhos(); lastFocus = document.activeElement; renderGaveta(); sheet.hidden = false; scrim.hidden = false; $('#btnFechaGaveta').focus(); }
 function closeGaveta() { if (sheet.hidden) return; sheet.hidden = true; scrim.hidden = true; if (lastFocus && document.contains(lastFocus)) lastFocus.focus(); }
@@ -1135,7 +1202,7 @@ const etapaEl = $('#etapa');
 const etapas = criarEtapas({
   UI, saveUI, store: () => store, backend: () => backend, esc, ICON, toast, linkar, fmtData, fmtDataBR, rebaixar, plural, areaNome,
   irPara: (e, k) => irPara(e, k), mudarEstado: (i, e) => mudarEstado(i, e), apagarDirecao: d => apagarDirecao(d), renderNav: () => renderNav(),
-  apagarItem: it => apagarItem(it), verNoMapa: it => verNoMapa(it), converterAntiga: i => converterAntiga(i), local: () => LOCAL,
+  apagarItem: it => apagarItem(it), apagarIdeia: i => mandarParaLixeira(i), verNoMapa: it => verNoMapa(it), converterAntiga: i => converterAntiga(i), local: () => LOCAL,
   get DESFAZER_MS() { return DESFAZER_MS; }
 });
 function renderNav() {
@@ -1357,6 +1424,7 @@ window.addEventListener('beforeunload', e => { efetivarAdiado(); if (store && st
 /* ---------------- teclado ---------------- */
 document.addEventListener('keydown', e => {
   if (!store || !$('#entrada').hidden) return;
+  if (document.querySelector('dialog.conf[open]')) return; // a confirmação cuida das teclas dela (Esc cancela)
   const typing = e.target.closest && e.target.closest('input, textarea, [contenteditable]');
   if (e.key === 'Escape') {
     if (renaming) return;

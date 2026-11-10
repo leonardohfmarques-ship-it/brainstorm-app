@@ -1,7 +1,7 @@
 // Backend de desenvolvimento (?local=1): lê os arquivos servidos pelo dev-server (/dados/ = pasta BRAINSTORM)
 // e grava só neste navegador (localStorage). Nunca escreve nos arquivos de verdade.
 import { ErroAPI } from './github.js';
-import { ehTexto } from './modelo.js';
+import { ehTexto, RE_LIXO } from './modelo.js';
 
 const OVERLAY = 'bs-local-overlay';
 const APAGADOS = 'bs-local-apagados'; // pastas apagadas neste navegador
@@ -31,6 +31,22 @@ export class LocalBackend {
   async testar() { return true; }
   apagado(p) { return this.apagados.some(b => p.startsWith(b + '/')); }
 
+  // existe esta pasta no disco? (lista a mãe, sem pedir a pasta: pasta que não existe dá 404 e suja o console)
+  async existe(dir) {
+    const partes = String(dir).replace(/\/+$/, '').split('/');
+    const nome = partes.pop() + '/', mae = partes.length ? partes.join('/') + '/' : '';
+    if (mae && !(await this.existe(mae))) return false;
+    return (await this.nomes(mae)).includes(nome);
+  }
+  async nomes(dir) {
+    let res;
+    try { res = await fetch(this.base + caminho(dir), { cache: 'no-store' }); }
+    catch (e) { throw new ErroAPI('rede', 'O servidor local não respondeu.'); }
+    if (!res.ok) return [];
+    const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+    return [...doc.querySelectorAll('a[href]')].map(a => a.getAttribute('href')).filter(h => h && !h.startsWith('?') && !h.startsWith('/') && !h.startsWith('..') && !/^[a-z]+:/i.test(h)).map(h => decodeURIComponent(h));
+  }
+
   async listar(dir) {
     let res;
     try { res = await fetch(this.base + caminho(dir), { cache: 'no-store' }); }
@@ -55,7 +71,8 @@ export class LocalBackend {
 
   async load() {
     await espera(this.atraso);
-    const todos = await this.listar('ideias/');
+    const lixo = (await this.existe('lixeira/ideias/')) ? (await this.listar('lixeira/ideias/')).filter(p => RE_LIXO.test(p)) : [];
+    const todos = (await this.listar('ideias/')).concat(lixo);
     const files = new Map();
     await Promise.all(todos.filter(p => ehTexto(p) && !this.apagado(p)).map(async p => {
       const r = await fetch(this.base + caminho(p), { cache: 'no-store' });
@@ -102,6 +119,28 @@ export class LocalBackend {
     for (const p of [...this.indice.keys()]) if (p.startsWith(b + '/')) { this.indice.delete(p); n++; }
     this.commits.push({ path: b, message, apagou: true, quando: Date.now() });
     return { apagados: n };
+  }
+
+  // move a pasta só neste navegador (lixeira e restaurar): os textos vão para o overlay no destino e a origem
+  // entra em "apagados"; restaurar tira o destino de "apagados" (os arquivos de verdade voltam a valer)
+  async mover(de, para, message, conteudos = {}) {
+    await espera(this.atraso);
+    const d = String(de).replace(/\/+$/, ''), pa = String(para).replace(/\/+$/, '');
+    const textos = {};
+    if (!this.apagado(d + '/x') && (await this.existe(d))) {
+      const disco = (await this.listar(d + '/')).filter(p => ehTexto(p) && !this.apagado(p));
+      await Promise.all(disco.map(async p => { const r = await fetch(this.base + caminho(p), { cache: 'no-store' }); if (r.ok) textos[p] = await r.text(); }));
+    }
+    for (const [p, t] of Object.entries(this.overlay)) if (p.startsWith(d + '/')) { textos[p] = t; delete this.overlay[p]; }
+    const rels = new Set(Object.keys(textos).map(p => p.slice(d.length + 1)).concat(Object.keys(conteudos)));
+    if (!rels.size) return { movidos: 0 };
+    this.apagados = this.apagados.filter(b => b !== pa && !b.startsWith(pa + '/') && !pa.startsWith(b + '/'));
+    if (!this.apagados.includes(d)) this.apagados.push(d);
+    for (const rel of rels) this.overlay[pa + '/' + rel] = rel in conteudos ? conteudos[rel] : textos[d + '/' + rel];
+    gravarApagados(this.apagados); gravarOverlay(this.overlay);
+    for (const p of [...this.indice.keys()]) if (p.startsWith(d + '/')) { this.indice.set(pa + p.slice(d.length), this.indice.get(p)); this.indice.delete(p); }
+    this.commits.push({ path: d, para: pa, message, moveu: true, quando: Date.now() });
+    return { movidos: rels.size };
   }
 
   async anexoURL(path) { return this.base + caminho(path); }
